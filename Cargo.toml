@@ -1,0 +1,6 @@
+[package]
+name = "beach"
+version = "0.1.0"
+authors = ["Kyle McKean <mckean.kylej@gmail.com>"]
+
+[dependencies]
