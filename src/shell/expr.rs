@@ -1,11 +1,42 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::ffi::OsStr;
 use itertools::Itertools;
 use nom::{space, Err, ErrorKind};
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Program<'a> {
+    Cd,
+    Exit,
+    Other(&'a str)
+}
+
+impl<'a> AsRef<OsStr> for Program<'a> {
+    fn as_ref(&self) -> &OsStr {
+        use self::Program::*;
+        let s = match *self {
+            Cd => "cd",
+            Exit => "exit",
+            Other(name) => name
+        };
+        s.as_ref()
+    }
+}
+
+impl<'a> Display for Program<'a> {
+    fn fmt(&self, format: &mut Formatter) -> fmt::Result {
+        use self::Program::*;
+        match *self {
+            Cd => write!(format, "cd"),
+            Exit => write!(format, "exit"),
+            Other(name) => write!(format, "{}", name)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Process<'a> {
-    pub name: &'a str,
+    pub name: Program<'a>,
     pub args: Vec<&'a str>
 }
 
@@ -71,6 +102,15 @@ named!(
 );
 
 named!(
+    program<&str, Program>,
+    alt_complete!(
+        value!(Program::Cd,   tag_s!("cd")) |
+        value!(Program::Exit, tag_s!("exit")) |
+        map!(string, Program::Other)
+    )
+);
+
+named!(
     strict_args<&str, Vec<&str>>,
     separated_list_complete!(space, string)
 );
@@ -86,7 +126,7 @@ named!(
 named!(
     process<&str, Process>,
     do_parse!(
-        name: string >>
+        name: program >>
         opt!(space) >>
         args: args >>
         (Process { name, args })
@@ -170,16 +210,23 @@ mod tests {
 
     #[test]
     fn command() {
+        let cd = Expr::Base (
+            Process {
+                name: Program::Cd,
+                args: vec![]
+            }
+        );
+        total_to("cd ", cd);
         let ping = Expr::Base(
             Process {
-                name: "ping",
+                name: Program::Other("ping"),
                 args: vec![]
             }
         );
         total_to("ping ", ping);
         let ping_args = Expr::Base(
             Process {
-                name: "ping",
+                name: Program::Other("ping"),
                 args: vec!["-t", "5"]
             }
         );
@@ -189,11 +236,11 @@ mod tests {
     #[test]
     fn total() {
         let find = Process {
-            name: "find",
+            name: Program::Other("find"),
             args: vec!["-t", "f", "--name", "result"]
         };
         let cat = Process {
-            name: "cat",
+            name: Program::Other("cat"),
             args: vec![]
         };
         let comm = Expr::Sequence {
