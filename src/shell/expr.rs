@@ -4,12 +4,12 @@ use itertools::Itertools;
 use nom::{space, Err, ErrorKind};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Command<'a> {
+pub struct Process<'a> {
     pub name: &'a str,
     pub args: Vec<&'a str>
 }
 
-impl<'a> Display for Command<'a> {
+impl<'a> Display for Process<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
         let rest = self.args.iter().join(" ");
         write!(format, "{} {}", self.name, rest)
@@ -36,9 +36,9 @@ impl Display for Operator {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr<'a> {
-    Base(Command<'a>),
+    Base(Process<'a>),
     Sequence {
-        left:  Command<'a>,
+        left:  Process<'a>,
         op:    Operator,
         right: Box<Expr<'a>>
     },
@@ -52,8 +52,8 @@ impl<'a> Display for Expr<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
         use self::Expr::*;
         match *self {
-            Base(ref command) => {
-                write!(format, "{}", command)
+            Base(ref process) => {
+                write!(format, "{}", process)
             },
             Sequence { ref left, op, ref right } => {
                 write!(format, "{} {} {}", left, op, right)
@@ -84,12 +84,12 @@ named!(
 );
 
 named!(
-    command<&str, Command>,
+    process<&str, Process>,
     do_parse!(
         name: string >>
         opt!(space) >>
         args: args >>
-        (Command { name, args })
+        (Process { name, args })
     )
 );
 
@@ -108,7 +108,7 @@ named!(
 named!(
     sequence<&str, Expr>,
     do_parse!(
-        left: command >>
+        left: process >>
         opt!(space) >>
         op: operator >>
         opt!(space) >>
@@ -119,7 +119,7 @@ named!(
 
 named!(
     expr<&str, Expr>,
-    alt_complete!( sequence | map!(command, Expr::Base) )
+    alt_complete!( sequence | map!(process, Expr::Base) )
 );
 
 named!(
@@ -171,14 +171,14 @@ mod tests {
     #[test]
     fn command() {
         let ping = Expr::Base(
-            Command {
+            Process {
                 name: "ping",
                 args: vec![]
             }
         );
         total_to("ping ", ping);
         let ping_args = Expr::Base(
-            Command {
+            Process {
                 name: "ping",
                 args: vec!["-t", "5"]
             }
@@ -188,11 +188,11 @@ mod tests {
 
     #[test]
     fn total() {
-        let find = Command {
+        let find = Process {
             name: "find",
             args: vec!["-t", "f", "--name", "result"]
         };
-        let cat = Command {
+        let cat = Process {
             name: "cat",
             args: vec![]
         };

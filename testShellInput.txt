@@ -1,0 +1,8 @@
+mkdir aDirectory
+ls
+cd aDirectory
+ls
+touch aFile.txt
+ls
+echo Hello world!
+exit

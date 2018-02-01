@@ -1,22 +1,42 @@
 extern crate itertools;
 #[macro_use]
 extern crate nom;
+extern crate rustyline;
 
-use std::io;
-
+use rustyline::Editor;
+use rustyline::error::ReadlineError;
 mod shell;
 
-pub fn repl() -> ! {
+pub fn repl() {
+    let prompt = "> "; // TODO: Config?
     loop {
-        let mut buffer = String::new();
-        io::stdin().read_line(&mut buffer).expect("ERROR: Could not aquire stdin lock");
-        let parsed = shell::parse(&buffer);
-        match parsed {
-            Err(err) => {
-                let no_newlines = buffer.chars().filter(|c| *c != '\n').collect::<String>();
-                println!("ERROR: Could not parse ({}) because {}", no_newlines, err)
+        let mut rl = Editor::<()>::new();
+        let readline = rl.readline(prompt);
+        match readline {
+            Ok(ref line) if line.is_empty() => {},
+            Ok(ref line) => {
+                match shell::parse(line) {
+                    Err(err) => {
+                        let no_newlines = line.chars().filter(|c| *c != '\n').collect::<String>();
+                        println!("ERROR: Could not parse ({}) because {}", no_newlines, err)
+                    },
+                    Ok(e) => {
+                        shell::exec(e);
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break
             },
-            Ok(e) => shell::exec(e)
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break
+            },
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break
+            }
         }
     }
 }
