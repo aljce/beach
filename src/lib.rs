@@ -28,15 +28,16 @@ pub fn repl() {
     rl.set_completer(Some(c));
     rl.bind_sequence(KeyPress::Down, Cmd::HistorySearchForward);
     rl.bind_sequence(KeyPress::Up,   Cmd::HistorySearchBackward);
-    let history_file = home_dir().expect("No home directory").join("beach_history");
+    let history_file = home_dir().expect("No home directory").join(".beach_history");
     if rl.load_history(&history_file).is_err() {
+        println!("No history file creating...");
         let mut file = File::create(&history_file).unwrap();
         file.write_all(b"").unwrap();
     }
     loop {
         let readline = rl.readline(prompt);
         match readline {
-            Ok(ref line) if line.is_empty() => {},
+            Ok(ref line) if line.is_empty() => {}
             Ok(ref line) => {
                 let mut fixed = line.clone();
                 fixed.push(' '); // TODO: This a huge hack to fix an egde case in the parser FIXME
@@ -56,13 +57,10 @@ pub fn repl() {
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
                 break
-            },
-            Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
-                break
-            },
+            }
+            Err(ReadlineError::Eof) => break,
             Err(err) => {
-                println!("Error: {:?}", err);
+                println!("ERROR: {}", err);
                 break
             }
         }
