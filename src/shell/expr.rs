@@ -4,20 +4,15 @@ use itertools::Itertools;
 use nom::{space, Err, ErrorKind};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Arg<'a> {
-    Short(&'a str),
-    Long(&'a str),
-    Name(&'a str)
+pub struct Command<'a> {
+    pub name: &'a str,
+    pub args: Vec<&'a str>
 }
 
-impl<'a> Display for Arg<'a> {
+impl<'a> Display for Command<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
-        use self::Arg::*;
-        match *self {
-            Short(c) => write!(format, "-{}", c),
-            Long(s)  => write!(format, "--{}", s),
-            Name(s)  => write!(format, "{}", s)
-        }
+        let rest = self.args.iter().join(" ");
+        write!(format, "{} {}", self.name, rest)
     }
 }
 
@@ -36,19 +31,6 @@ impl Display for Operator {
             Or   => write!(format, "||"),
             And  => write!(format, "&&")
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Command<'a> {
-    name: &'a str,
-    args: Vec<Arg<'a>>
-}
-
-impl<'a> Display for Command<'a> {
-    fn fmt(&self, format: &mut Formatter) -> fmt::Result {
-        let rest = self.args.iter().join(" ");
-        write!(format, "{} {}", self.name, rest)
     }
 }
 
@@ -88,38 +70,13 @@ named!(
     take_till_s!(|c| c == ' ' || c == '|' || c == '&' || c == '>')
 );
 
-
 named!(
-    arg<&str, Arg>,
-    return_error!(
-        ErrorKind::Custom(0),
-        alt_complete!(
-            do_parse!(tag!("--") >> arg: string >> (Arg::Long(arg))) |
-            do_parse!(char!('-') >> arg: string >> (Arg::Short(arg))) |
-            map!(string, Arg::Name)
-        )
-    )
+    strict_args<&str, Vec<&str>>,
+    separated_list_complete!(space, string)
 );
 
 named!(
-    operator<&str, Operator>,
-    return_error!(
-        ErrorKind::Custom(1),
-        alt_complete!(
-            value!(Operator::Pipe, char!('|')) |
-            value!(Operator::Or,   tag_s!("||")) |
-            value!(Operator::And,  tag_s!("&&"))
-        )
-    )
-);
-
-named!(
-    strict_args<&str, Vec<Arg>>,
-    separated_list_complete!(space, arg)
-);
-
-named!(
-    args<&str, Vec<Arg>>,
+    args<&str, Vec<&str>>,
     map!(
         opt!(strict_args),
         |res| res.unwrap_or(vec![])
@@ -133,6 +90,18 @@ named!(
         opt!(space) >>
         args: args >>
         (Command { name, args })
+    )
+);
+
+named!(
+    operator<&str, Operator>,
+    return_error!(
+        ErrorKind::Custom(1),
+        alt_complete!(
+            value!(Operator::Pipe, char!('|')) |
+            value!(Operator::Or,   tag_s!("||")) |
+            value!(Operator::And,  tag_s!("&&"))
+        )
     )
 );
 
@@ -195,13 +164,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn arg() {
-        parses_to(super::arg("--foo"), Arg::Long("foo"));
-        parses_to(super::arg("-foo"), Arg::Short("foo"));
-        parses_to(super::arg("foo"), Arg::Name("foo"));
-    }
-
     fn total_to(s: &str, correct: Expr) {
         parses_to(super::total(s), correct)
     }
@@ -218,7 +180,7 @@ mod tests {
         let ping_args = Expr::Base(
             Command {
                 name: "ping",
-                args: vec![Arg::Short("t"), Arg::Name("5")]
+                args: vec!["-t", "5"]
             }
         );
         total_to("ping -t 5", ping_args);
@@ -228,12 +190,7 @@ mod tests {
     fn total() {
         let find = Command {
             name: "find",
-            args: vec![
-                Arg::Short("t"),
-                Arg::Name("f"),
-                Arg::Long("name"),
-                Arg::Name("result")
-            ]
+            args: vec!["-t", "f", "--name", "result"]
         };
         let cat = Command {
             name: "cat",

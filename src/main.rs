@@ -1,7 +1,7 @@
 extern crate beach;
 
-use beach::{example};
+use beach::{repl};
 
 fn main() {
-    example()
+    repl()
 }
