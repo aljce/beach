@@ -40,13 +40,23 @@ impl Display for Operator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Command<'a> {
+    name: &'a str,
+    args: Vec<Arg<'a>>
+}
+
+impl<'a> Display for Command<'a> {
+    fn fmt(&self, format: &mut Formatter) -> fmt::Result {
+        let rest = self.args.iter().join(" ");
+        write!(format, "{} {}", self.name, rest)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr<'a> {
-    Command {
-        name: &'a str,
-        args: Vec<Arg<'a>>
-    },
+    Base(Command<'a>),
     Sequence {
-        left:  Box<Expr<'a>>,
+        left:  Command<'a>,
         op:    Operator,
         right: Box<Expr<'a>>
     },
@@ -60,9 +70,8 @@ impl<'a> Display for Expr<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
         use self::Expr::*;
         match *self {
-            Command { name, ref args } => {
-                let rest = args.iter().join(" ");
-                write!(format, "{} {}", name, rest)
+            Base(ref command) => {
+                write!(format, "{}", command)
             },
             Sequence { ref left, op, ref right } => {
                 write!(format, "{} {} {}", left, op, right)
@@ -118,12 +127,12 @@ named!(
 );
 
 named!(
-    command<&str, Expr>,
+    command<&str, Command>,
     do_parse!(
         name: string >>
         opt!(space) >>
         args: args >>
-        (Expr::Command { name, args })
+        (Command { name, args })
     )
 );
 
@@ -134,14 +143,14 @@ named!(
         opt!(space) >>
         op: operator >>
         opt!(space) >>
-        right: command >>
-        (Expr::Sequence { left: Box::new(left), op, right: Box::new(right) })
+        right: expr >>
+        (Expr::Sequence { left, op, right: Box::new(right) })
     )
 );
 
 named!(
     expr<&str, Expr>,
-    alt_complete!( sequence | command )
+    alt_complete!( sequence | map!(command, Expr::Base) )
 );
 
 named!(
@@ -199,21 +208,25 @@ mod tests {
 
     #[test]
     fn command() {
-        let ping = Expr::Command {
-            name: "ping",
-            args: vec![]
-        };
+        let ping = Expr::Base(
+            Command {
+                name: "ping",
+                args: vec![]
+            }
+        );
         total_to("ping ", ping);
-        let ping_args = Expr::Command {
-            name: "ping",
-            args: vec![Arg::Short("t"), Arg::Name("5")]
-        };
+        let ping_args = Expr::Base(
+            Command {
+                name: "ping",
+                args: vec![Arg::Short("t"), Arg::Name("5")]
+            }
+        );
         total_to("ping -t 5", ping_args);
     }
 
     #[test]
     fn total() {
-        let find = Expr::Command {
+        let find = Command {
             name: "find",
             args: vec![
                 Arg::Short("t"),
@@ -222,14 +235,14 @@ mod tests {
                 Arg::Name("result")
             ]
         };
-        let cat = Expr::Command {
+        let cat = Command {
             name: "cat",
             args: vec![]
         };
         let comm = Expr::Sequence {
-            left: Box::new(find),
+            left: find,
             op: Operator::Pipe,
-            right: Box::new(cat)
+            right: Box::new(Expr::Base(cat))
         };
         let res = Expr::Redirect {
             expr: Box::new(comm),
