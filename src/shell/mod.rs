@@ -1,7 +1,9 @@
-use std::process::{Command, Child, ExitStatus};
+use std::process::{Command, Child, Stdio, ExitStatus};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::env::current_dir;
+use std::io::Write;
+use std::fs::File;
 
 pub mod expr;
 pub use self::expr::*;
@@ -20,20 +22,49 @@ impl Env {
     }
 }
 
+pub struct Pipes {
+    stdin:  Stdio,
+    stdout: Stdio
+}
+
+impl Pipes {
+    pub fn inherit() -> Pipes {
+        Pipes {
+            stdin:  Stdio::inherit(),
+            stdout: Stdio::inherit()
+        }
+    }
+
+    pub fn piped_stdout(stdin: Stdio) -> Pipes {
+        Pipes {
+            stdin:  stdin,
+            stdout: Stdio::piped()
+        }
+    }
+}
+
+
 pub enum Result<A> {
-    Cd,
+    Continue,
     Exit,
     Normal(A)
 }
 
 impl<A> Result<A> {
+
     /// Result is a Functor
     fn map<B,F>(self, f: F) -> Result<B> where F: Fn(A) -> B {
         use self::Result::*;
+        self.flat_map(|a| Normal(f(a)))
+    }
+
+    // Result is a Monad
+    fn flat_map<B,F>(self, f: F) -> Result<B> where F: Fn(A) -> Result<B> {
+        use self::Result::*;
         match self {
-            Cd => Cd,
+            Continue => Continue,
             Exit => Exit,
-            Normal(a) => Normal(f(a))
+            Normal(a) => f(a)
         }
     }
 }
@@ -53,7 +84,7 @@ fn cd(env: &Env, path: &str) {
 
 }
 
-fn process(env: &Env, c: Process) -> Result<Child> {
+fn process(env: &Env, pipes: Pipes, c: Process) -> Result<Child> {
     match c.name {
         // TODO: Look into how to use cd & exit programs so this hack isnt needed
         Program::Cd => {
@@ -63,7 +94,7 @@ fn process(env: &Env, c: Process) -> Result<Child> {
             } else {
                 cd(env, c.args[0])
             }
-            Result::Cd
+            Result::Continue
         },
         Program::Exit => Result::Exit,
         Program::Other(name) => {
@@ -71,6 +102,8 @@ fn process(env: &Env, c: Process) -> Result<Child> {
             Result::Normal(
                 p.args(c.args)
                  .current_dir(env.current_dir.borrow().clone())
+                 .stdin(pipes.stdin)
+                 .stdout(pipes.stdout)
                  .spawn()
                  .expect(&format!("Could not start {} process", name))
             )
@@ -78,23 +111,29 @@ fn process(env: &Env, c: Process) -> Result<Child> {
     }
 }
 
-fn sequence(_env: &Env, _left: Process, op: Operator, _right: Expr) -> ! {
+fn sequence(_env: &Env, _pipes: Pipes, _left: Process, op: Operator, _right: Expr) -> ! {
     panic!("{} unimplemented", op)
 }
 
-fn redirect<'a>(_env: &Env, _expr: Expr<'a>, _file: &'a str) -> ! {
-    panic!("redirect unimplemented")
+fn redirect<'a>(env: &Env, pipes: Pipes, e: Expr<'a>, file: &'a str) -> Result<Child> {
+    let piped = Pipes::piped_stdout(pipes.stdin);
+    expr(env, piped, e).flat_map(|child| {
+        let output = child.wait_with_output().expect("Could not read stdout from child process");
+        let mut file = File::create(file).unwrap();
+        file.write_all(&output.stdout).unwrap();
+        Result::Continue
+    })
 }
 
-fn expr(env: &Env, e: Expr) -> Result<Child> {
+fn expr(env: &Env, pipes: Pipes, e: Expr) -> Result<Child> {
     match e {
-        Expr::Base(c) => process(env, c),
-        Expr::Sequence { left, op, right } => sequence(env, left, op, *right),
-        Expr::Redirect { expr, file } => redirect(env, *expr, file)
+        Expr::Base(c) => process(env, pipes, c),
+        Expr::Sequence { left, op, right } => sequence(env, pipes, left, op, *right),
+        Expr::Redirect { expr, file } => redirect(env, pipes, *expr, file)
     }
 }
 
 pub fn exec(env: &Env, e: Expr) -> Result<ExitStatus> {
-    let p = expr(env, e);
+    let p = expr(env, Pipes::inherit(), e);
     p.map(|mut child| child.wait().unwrap())
 }

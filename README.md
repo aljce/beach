@@ -9,6 +9,7 @@ cargo run
 ```
 # Feature List
 - Process Creation
+- Stdout Redirection (>)
 - Full tty support (try running vim)
 - Tab completion of files
 - History completion (up/down keys)
