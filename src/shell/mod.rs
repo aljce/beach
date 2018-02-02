@@ -41,6 +41,13 @@ impl Pipes {
             stdout: Stdio::piped()
         }
     }
+
+    pub fn piped_stdin(stdout: Stdio) -> Pipes {
+        Pipes {
+            stdin:  Stdio::piped(),
+            stdout: stdout
+        }
+    }
 }
 
 
@@ -53,13 +60,13 @@ pub enum Result<A> {
 impl<A> Result<A> {
 
     /// Result is a Functor
-    fn map<B,F>(self, f: F) -> Result<B> where F: Fn(A) -> B {
+    fn map<B,F>(self, f: F) -> Result<B> where F: FnOnce(A) -> B {
         use self::Result::*;
         self.flat_map(|a| Normal(f(a)))
     }
 
     // Result is a Monad
-    fn flat_map<B,F>(self, f: F) -> Result<B> where F: Fn(A) -> Result<B> {
+    fn flat_map<B,F>(self, f: F) -> Result<B> where F: FnOnce(A) -> Result<B> {
         use self::Result::*;
         match self {
             Continue => Continue,
@@ -95,7 +102,7 @@ fn process(env: &Env, pipes: Pipes, c: Process) -> Result<Child> {
                 cd(env, c.args[0])
             }
             Result::Continue
-        },
+        }
         Program::Exit => Result::Exit,
         Program::Other(name) => {
             let mut p = Command::new(name);
@@ -111,8 +118,31 @@ fn process(env: &Env, pipes: Pipes, c: Process) -> Result<Child> {
     }
 }
 
-fn sequence(_env: &Env, _pipes: Pipes, _left: Process, op: Operator, _right: Expr) -> ! {
-    panic!("{} unimplemented", op)
+fn sequence(env: &Env, pipes: Pipes, left: Process, op: Operator, right: Expr) -> Result<Child> {
+    let stdout = Pipes::piped_stdout(pipes.stdin);
+    let stdin  = Pipes::piped_stdin(pipes.stdout);
+    process(env, stdout, left).flat_map(|left_child| {
+        let output = left_child.wait_with_output().expect("Could not read stdout from child process");
+        match op {
+            Operator::Pipe => {
+                /*
+                expr(env, stdin, right).map(|right_child| {
+                    let mut child_stdin = right_child.stdin.expect("Could not read stdin from child process");
+                    child_stdin.write_all(&output.stdout).expect("Could not aquire stdin lock for child process");
+                    right_child
+                })
+                */
+                unimplemented!()
+            }
+            Operator::Or => {
+                unimplemented!()
+            }
+            Operator::And => {
+                unimplemented!()
+            }
+        }
+
+    })
 }
 
 fn redirect<'a>(env: &Env, pipes: Pipes, e: Expr<'a>, file: &'a str) -> Result<Child> {
