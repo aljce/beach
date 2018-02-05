@@ -12,7 +12,7 @@ use rustyline::completion::FilenameCompleter;
 use rustyline::error::ReadlineError;
 
 mod shell;
-use shell::{Env, Result};
+use shell::{Env, ProcessErr};
 
 pub fn repl() {
     let prompt = "> "; // TODO: Config?
@@ -28,9 +28,9 @@ pub fn repl() {
     rl.set_completer(Some(c));
     rl.bind_sequence(KeyPress::Down, Cmd::HistorySearchForward);
     rl.bind_sequence(KeyPress::Up,   Cmd::HistorySearchBackward);
-    let history_file = home_dir().expect("No home directory").join(".beach_history");
+    let history_file = home_dir().expect("no home directory").join(".beach_history");
     if rl.load_history(&history_file).is_err() {
-        println!("No history file creating...");
+        println!("no history file creating[{}]...", history_file.to_string_lossy());
         let mut file = File::create(&history_file).unwrap();
         file.write_all(b"").unwrap();
     }
@@ -44,23 +44,32 @@ pub fn repl() {
                 match shell::parse(&fixed) {
                     Err(err) => {
                         let no_newlines = line.chars().filter(|c| *c != '\n').collect::<String>();
-                        println!("ERROR: Could not parse ({}) because {}", no_newlines, err)
+                        eprintln!("ERROR: could not parse ({}) because {}", no_newlines, err)
                     },
                     Ok(e) => {
                         rl.add_history_entry(line.as_ref());
-                        if let Result::Exit = shell::exec(&env, e) {
-                            break
+                        if let Err(process_err) = shell::exec(&env, e) {
+                            match process_err {
+                                ProcessErr::Continue => (),
+                                ProcessErr::Exit => break,
+                                ProcessErr::Error(io_err) => {
+                                    eprintln!("ERROR: {}", io_err);
+                                }
+                                ProcessErr::Pipe => {
+                                    eprintln!("ERROR: could not aquire a stdin or stdout");
+                                }
+                            }
                         };
                     }
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                println!("CTRL-C");
-                break
+                eprintln!("CTRL-C");
+                continue
             }
             Err(ReadlineError::Eof) => break,
             Err(err) => {
-                println!("ERROR: {}", err);
+                eprintln!("ERROR: {}", err);
                 break
             }
         }

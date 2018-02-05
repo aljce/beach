@@ -138,9 +138,9 @@ named!(
     return_error!(
         ErrorKind::Custom(1),
         alt_complete!(
-            value!(Operator::Pipe, char!('|')) |
             value!(Operator::Or,   tag_s!("||")) |
-            value!(Operator::And,  tag_s!("&&"))
+            value!(Operator::And,  tag_s!("&&")) |
+            value!(Operator::Pipe, char!('|'))
         )
     )
 );

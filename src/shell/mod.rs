@@ -1,8 +1,9 @@
-use std::process::{Command, Child, Stdio, ExitStatus};
+use std::result;
+use std::io;
+use std::process::{Command, Stdio, ExitStatus};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::env::current_dir;
-use std::io::Write;
 use std::fs::File;
 
 pub mod expr;
@@ -15,155 +16,117 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Env {
-        let dir = current_dir().expect("Insufficient permissions");
+        let dir = current_dir().expect("ERROR: Insufficient permissions to read master process current directory");
         Env {
             current_dir: RefCell::new(dir)
         }
     }
 }
 
-pub struct Pipes {
-    stdin:  Stdio,
-    stdout: Stdio
-}
-
-impl Pipes {
-    pub fn inherit() -> Pipes {
-        Pipes {
-            stdin:  Stdio::inherit(),
-            stdout: Stdio::inherit()
-        }
-    }
-
-    pub fn piped_stdout(stdin: Stdio) -> Pipes {
-        Pipes {
-            stdin:  stdin,
-            stdout: Stdio::piped()
-        }
-    }
-
-    pub fn piped_stdin(stdout: Stdio) -> Pipes {
-        Pipes {
-            stdin:  Stdio::piped(),
-            stdout: stdout
+fn cd(env: &Env, args: Vec<&str>) {
+    // TODO: Look into how to use cd & exit programs so this hack isnt needed
+    let number_args = args.len();
+    if number_args != 1 {
+        eprintln!("ERROR: cd requires exactly 1 argument you gave [{}]", number_args)
+    } else {
+        let path = PathBuf::from(args[0]);
+        if path.is_dir() {
+            let mut buf = env.current_dir.borrow_mut();
+            if path.is_absolute() {
+                *buf = path;
+            } else {
+                *buf = buf.join(path);
+            }
+        } else {
+            eprintln!("ERROR: cd requires the argument to be a directory and to be accessable")
         }
     }
 }
 
-
-pub enum Result<A> {
+pub enum ProcessErr {
     Continue,
     Exit,
-    Normal(A)
+    Error(io::Error),
+    Pipe
 }
 
-impl<A> Result<A> {
-
-    /// Result is a Functor
-    fn map<B,F>(self, f: F) -> Result<B> where F: FnOnce(A) -> B {
-        use self::Result::*;
-        self.flat_map(|a| Normal(f(a)))
-    }
-
-    // Result is a Monad
-    fn flat_map<B,F>(self, f: F) -> Result<B> where F: FnOnce(A) -> Result<B> {
-        use self::Result::*;
-        match self {
-            Continue => Continue,
-            Exit => Exit,
-            Normal(a) => f(a)
-        }
+impl From<io::Error> for ProcessErr {
+    fn from(err: io::Error) -> ProcessErr {
+        ProcessErr::Error(err)
     }
 }
 
-fn cd(env: &Env, path: &str) {
-    let mut buf = env.current_dir.borrow_mut();
-    let path = PathBuf::from(path);
-    if path.is_dir() {
-        if path.is_absolute() {
-            *buf = path;
-        } else {
-            *buf = buf.join(path);
-        }
-    } else {
-        println!("cd: requires the argument to be a directory and to be accessable")
-    }
+type ProcessResult<A> = result::Result<A, ProcessErr>;
 
-}
-
-fn process(env: &Env, pipes: Pipes, c: Process) -> Result<Child> {
+fn process(env: &Env, c: Process) -> ProcessResult<Command> {
     match c.name {
-        // TODO: Look into how to use cd & exit programs so this hack isnt needed
         Program::Cd => {
-            let number_args = c.args.len();
-            if number_args != 1 {
-                println!("cd: requires exactly 1 argument you gave [{}]", number_args)
-            } else {
-                cd(env, c.args[0])
-            }
-            Result::Continue
+            cd(env, c.args);
+            Err(ProcessErr::Continue)
         }
-        Program::Exit => Result::Exit,
+        Program::Exit => Err(ProcessErr::Exit),
         Program::Other(name) => {
-            let mut p = Command::new(name);
-            Result::Normal(
-                p.args(c.args)
-                 .current_dir(env.current_dir.borrow().clone())
-                 .stdin(pipes.stdin)
-                 .stdout(pipes.stdout)
-                 .spawn()
-                 .expect(&format!("Could not start {} process", name))
-            )
+            let mut command = Command::new(name);
+            command
+                .args(c.args)
+                .current_dir(env.current_dir.borrow().clone());
+            Ok(command)
         }
     }
 }
 
-fn sequence(env: &Env, pipes: Pipes, left: Process, op: Operator, right: Expr) -> Result<Child> {
-    let stdout = Pipes::piped_stdout(pipes.stdin);
-    let stdin  = Pipes::piped_stdin(pipes.stdout);
-    process(env, stdout, left).flat_map(|left_child| {
-        let output = left_child.wait_with_output().expect("Could not read stdout from child process");
-        match op {
-            Operator::Pipe => {
-                /*
-                expr(env, stdin, right).map(|right_child| {
-                    let mut child_stdin = right_child.stdin.expect("Could not read stdin from child process");
-                    child_stdin.write_all(&output.stdout).expect("Could not aquire stdin lock for child process");
-                    right_child
-                })
-                */
-                unimplemented!()
-            }
-            Operator::Or => {
-                unimplemented!()
-            }
-            Operator::And => {
-                unimplemented!()
+fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> ProcessResult<Command> {
+    let mut left_command = process(env, left)?;
+    let mut right_command = expr(env, right)?;
+    match op {
+        Operator::Pipe => {
+            let mut left_child = left_command.stdout(Stdio::piped()).spawn()?;
+            let left_stdout = match left_child.stdout {
+                None => return Err(ProcessErr::Pipe),
+                Some(stdin) => stdin
+            };
+            right_command.stdin(left_stdout);
+            Ok(right_command)
+        }
+        Operator::Or => {
+            let mut left_child = left_command.spawn()?;
+            let left_exit = left_child.wait()?;
+            if left_exit.success() {
+                Ok(left_command)
+            } else {
+                Ok(right_command)
             }
         }
-
-    })
+        Operator::And => {
+            let mut left_child = left_command.spawn()?;
+            let left_exit = left_child.wait()?;
+            if left_exit.success() {
+                Ok(right_command)
+            } else {
+                Ok(left_command)
+            }
+        }
+    }
 }
 
-fn redirect<'a>(env: &Env, pipes: Pipes, e: Expr<'a>, file: &'a str) -> Result<Child> {
-    let piped = Pipes::piped_stdout(pipes.stdin);
-    expr(env, piped, e).flat_map(|child| {
-        let output = child.wait_with_output().expect("Could not read stdout from child process");
-        let mut file = File::create(file).unwrap();
-        file.write_all(&output.stdout).unwrap();
-        Result::Continue
-    })
+fn redirect<'a>(env: &Env, e: Expr<'a>, file: &'a str) -> ProcessResult<Command> {
+    let mut command = expr(env, e)?;
+    let file = File::create(file)?;
+    command.stdout(file);
+    Ok(command)
 }
 
-fn expr(env: &Env, pipes: Pipes, e: Expr) -> Result<Child> {
+fn expr(env: &Env, e: Expr) -> ProcessResult<Command> {
     match e {
-        Expr::Base(c) => process(env, pipes, c),
-        Expr::Sequence { left, op, right } => sequence(env, pipes, left, op, *right),
-        Expr::Redirect { expr, file } => redirect(env, pipes, *expr, file)
+        Expr::Base(c) => process(env, c),
+        Expr::Sequence { left, op, right } => sequence(env, left, op, *right),
+        Expr::Redirect { expr, file } => redirect(env, *expr, file)
     }
 }
 
-pub fn exec(env: &Env, e: Expr) -> Result<ExitStatus> {
-    let p = expr(env, Pipes::inherit(), e);
-    p.map(|mut child| child.wait().unwrap())
+pub fn exec(env: &Env, e: Expr) -> ProcessResult<ExitStatus> {
+    let mut command = expr(env, e)?;
+    let mut child = command.spawn()?;
+    let exit_code = child.wait()?;
+    Ok(exit_code)
 }
