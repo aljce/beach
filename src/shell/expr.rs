@@ -2,7 +2,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ffi::OsStr;
 use itertools::Itertools;
-use nom::{space, Err, ErrorKind};
+use nom::{space, multispace, Err, ErrorKind};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Program<'a> {
@@ -98,7 +98,12 @@ impl<'a> Display for Expr<'a> {
 
 named!(
     string<&str, &str>,
-    take_till_s!(|c| c == ' ' || c == '|' || c == '&' || c == '>')
+    take_till_s!(|c| c == ' ' || c == '\n' || c == '|' || c == '&' || c == '>')
+);
+
+named!(
+    opt_space<&str, ()>,
+    value!((), opt!(complete!(space)))
 );
 
 named!(
@@ -127,7 +132,7 @@ named!(
     process<&str, Process>,
     do_parse!(
         name: program >>
-        opt!(space) >>
+        opt_space >>
         args: args >>
         (Process { name, args })
     )
@@ -149,9 +154,9 @@ named!(
     sequence<&str, Expr>,
     do_parse!(
         left: process >>
-        opt!(space) >>
+        opt_space >>
         op: operator >>
-        opt!(space) >>
+        opt_space >>
         right: expr >>
         (Expr::Sequence { left, op, right: Box::new(right) })
     )
@@ -166,9 +171,9 @@ named!(
     redirect<&str, Expr>,
     do_parse!(
         expr: expr >>
-        opt!(space) >>
+        opt_space >>
         char!('>') >>
-        opt!(space) >>
+        opt_space >>
         file: string >>
         (Expr::Redirect { expr: Box::new(expr), file })
     )
@@ -176,7 +181,11 @@ named!(
 
 named!(
     total<&str, Expr>,
-    alt_complete!( redirect | expr )
+    do_parse!(
+        expr: alt_complete!( redirect | expr ) >>
+        opt!(complete!(multispace)) >>
+        (expr)
+    )
 );
 
 pub fn parse<'a>(s: &'a str) -> Result<Expr<'a>, Err> {
@@ -216,14 +225,14 @@ mod tests {
                 args: vec![]
             }
         );
-        total_to("cd ", cd);
+        total_to("cd", cd);
         let ping = Expr::Base(
             Process {
                 name: Program::Other("ping"),
                 args: vec![]
             }
         );
-        total_to("ping ", ping);
+        total_to("ping", ping);
         let ping_args = Expr::Base(
             Process {
                 name: Program::Other("ping"),

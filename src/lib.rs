@@ -39,9 +39,7 @@ pub fn repl() {
         match readline {
             Ok(ref line) if line.is_empty() => {}
             Ok(ref line) => {
-                let mut fixed = line.clone();
-                fixed.push(' '); // TODO: This a huge hack to fix an egde case in the parser FIXME
-                match shell::parse(&fixed) {
+                match shell::parse(&line) {
                     Err(err) => {
                         let no_newlines = line.chars().filter(|c| *c != '\n').collect::<String>();
                         eprintln!("ERROR: could not parse ({}) because {}", no_newlines, err)
@@ -65,7 +63,7 @@ pub fn repl() {
             }
             Err(ReadlineError::Interrupted) => {
                 eprintln!("CTRL-C");
-                continue
+                break
             }
             Err(ReadlineError::Eof) => break,
             Err(err) => {
