@@ -1,3 +1,4 @@
+use std::str;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ffi::OsStr;
@@ -37,7 +38,7 @@ impl<'a> Display for Program<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Process<'a> {
     pub name: Program<'a>,
-    pub args: Vec<&'a str>
+    pub args: Vec<String>
 }
 
 impl<'a> Display for Process<'a> {
@@ -75,7 +76,7 @@ pub enum Expr<'a> {
     },
     Redirect {
         expr: Box<Expr<'a>>,
-        file: &'a str
+        file: String
     },
 }
 
@@ -89,25 +90,58 @@ impl<'a> Display for Expr<'a> {
             Sequence { ref left, op, ref right } => {
                 write!(format, "{} {} {}", left, op, right)
             },
-            Redirect { ref expr, file } => {
+            Redirect { ref expr, ref file } => {
                 write!(format, "{} > {}", expr, file)
             },
         }
     }
 }
 
+const DISALLOWED_CHARS : &'static str = " |>\\\t\n\r\"";
+
 named!(
-    string<&str, &str>,
-    take_till_s!(|c| c == ' ' || c == '\n' || c == '|' || c == '&' || c == '>')
+    byte_string<&[u8]>,
+    take_till!(|c : u8| DISALLOWED_CHARS.as_bytes().iter().any(|d| *d == c))
 );
 
 named!(
-    opt_space<&str, ()>,
+    string<&str>,
+    map_res!(byte_string, str::from_utf8)
+);
+
+fn to_string(i: Vec<u8>) -> String {
+  String::from_utf8_lossy(&i).into_owned()
+}
+
+named!(
+    esc<String>,
+    map!(
+        escaped_transform!(
+            is_not!(DISALLOWED_CHARS),
+            '\\',
+            alt!(
+                  tag!(" ")  => { |_| " ".as_bytes() }
+                | tag!("|")  => { |_| "|".as_bytes() }
+                | tag!(">")  => { |_| ">".as_bytes() }
+                | tag!("\\") => { |_| "\\".as_bytes() }
+                | tag!("\t") => { |_| "\t".as_bytes() }
+                | tag!("\n") => { |_| "\n".as_bytes() }
+                | tag!("\r") => { |_| "\r".as_bytes() }
+                | tag!("\"") => { |_| "\"".as_bytes() }
+            )
+        ),
+        to_string
+    )
+);
+
+
+named!(
+    opt_space<()>,
     value!((), opt!(complete!(space)))
 );
 
 named!(
-    program<&str, Program>,
+    program<Program>,
     alt_complete!(
         value!(Program::Cd,   tag_s!("cd")) |
         value!(Program::Exit, tag_s!("exit")) |
@@ -116,12 +150,12 @@ named!(
 );
 
 named!(
-    strict_args<&str, Vec<&str>>,
-    separated_list_complete!(space, string)
+    strict_args<Vec<String>>,
+    separated_list_complete!(space, esc)
 );
 
 named!(
-    args<&str, Vec<&str>>,
+    args<Vec<String>>,
     map!(
         opt!(strict_args),
         |res| res.unwrap_or(vec![])
@@ -129,7 +163,7 @@ named!(
 );
 
 named!(
-    process<&str, Process>,
+    process<Process>,
     do_parse!(
         name: program >>
         opt_space >>
@@ -139,7 +173,7 @@ named!(
 );
 
 named!(
-    operator<&str, Operator>,
+    operator<Operator>,
     return_error!(
         ErrorKind::Custom(1),
         alt_complete!(
@@ -151,7 +185,7 @@ named!(
 );
 
 named!(
-    sequence<&str, Expr>,
+    sequence<Expr>,
     do_parse!(
         left: process >>
         opt_space >>
@@ -163,24 +197,24 @@ named!(
 );
 
 named!(
-    expr<&str, Expr>,
+    expr<Expr>,
     alt_complete!( sequence | map!(process, Expr::Base) )
 );
 
 named!(
-    redirect<&str, Expr>,
+    redirect<Expr>,
     do_parse!(
         expr: expr >>
         opt_space >>
         char!('>') >>
         opt_space >>
-        file: string >>
+        file: esc >>
         (Expr::Redirect { expr: Box::new(expr), file })
     )
 );
 
 named!(
-    total<&str, Expr>,
+    total<Expr>,
     do_parse!(
         expr: alt_complete!( redirect | expr ) >>
         opt!(complete!(multispace)) >>
@@ -189,7 +223,7 @@ named!(
 );
 
 pub fn parse<'a>(s: &'a str) -> Result<Expr<'a>, Err> {
-    total(s).to_result()
+    total(s.as_bytes()).to_result()
 }
 
 #[cfg(test)]
@@ -197,13 +231,14 @@ mod tests {
     use std::fmt::{Debug};
     use nom::{IResult};
 
-    fn parses_to<A>(res: IResult<&str, A>, correct: A)
+    fn parses_to<A>(res: IResult<&[u8], A>, correct: A)
         where A: PartialEq<A> + Debug
     {
         match res {
             IResult::Done(i,o) => {
                 if o != correct {
-                    panic!("{:?} does not equal {:?} and the parse had these leftovers: {}", o, correct, i)
+                    let i_str = str::from_utf8(i).unwrap();
+                    panic!("{:?} does not equal {:?} and the parse had these leftovers: {}", o, correct, i_str)
                 }
             },
             IResult::Error(err) => panic!("error: {:?}", err),
@@ -214,9 +249,16 @@ mod tests {
     use super::*;
 
     fn total_to(s: &str, correct: Expr) {
-        parses_to(super::total(s), correct)
+        parses_to(super::total(s.as_bytes()), correct)
     }
 
+
+    #[test]
+    fn esc() {
+        parses_to(super::esc("foobar".as_bytes()), "foobar".to_string());
+        parses_to(super::esc("foobar ".as_bytes()), "foobar".to_string());
+        parses_to(super::esc("foo\\ bar ".as_bytes()), "foo bar".to_string());
+    }
     #[test]
     fn command() {
         let cd = Expr::Base (
@@ -236,7 +278,7 @@ mod tests {
         let ping_args = Expr::Base(
             Process {
                 name: Program::Other("ping"),
-                args: vec!["-t", "5"]
+                args: vec!["-t".to_string(), "5".to_string()]
             }
         );
         total_to("ping -t 5", ping_args);
@@ -246,7 +288,10 @@ mod tests {
     fn total() {
         let find = Process {
             name: Program::Other("find"),
-            args: vec!["-t", "f", "--name", "result"]
+            args: vec![ "-t".to_string()
+                      , "f".to_string()
+                      , "--name".to_string()
+                      , "result".to_string() ]
         };
         let cat = Process {
             name: Program::Other("cat"),
@@ -259,7 +304,7 @@ mod tests {
         };
         let res = Expr::Redirect {
             expr: Box::new(comm),
-            file: "file.txt"
+            file: "file.txt".to_string()
         };
         total_to("find -t f --name result | cat > file.txt", res);
     }

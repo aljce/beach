@@ -23,13 +23,13 @@ impl Env {
     }
 }
 
-fn cd(env: &Env, args: Vec<&str>) {
+fn cd(env: &Env, args: Vec<String>) {
     // TODO: Look into how to use cd & exit programs so this hack isnt needed
     let number_args = args.len();
     if number_args != 1 {
         eprintln!("ERROR: cd requires exactly 1 argument you gave [{}]", number_args)
     } else {
-        let path = PathBuf::from(args[0]);
+        let path = PathBuf::from(&args[0]);
         if path.is_dir() {
             let mut buf = env.current_dir.borrow_mut();
             if path.is_absolute() {
@@ -109,7 +109,7 @@ fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> ProcessResul
     }
 }
 
-fn redirect<'a>(env: &Env, e: Expr<'a>, file: &'a str) -> ProcessResult<Command> {
+fn redirect(env: &Env, e: Expr, file: String) -> ProcessResult<Command> {
     let mut command = expr(env, e)?;
     let file = File::create(file)?;
     command.stdout(file);
