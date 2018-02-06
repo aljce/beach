@@ -48,7 +48,7 @@ pub fn repl() {
                         rl.add_history_entry(line.as_ref());
                         if let Err(process_err) = shell::exec(&env, e) {
                             match process_err {
-                                ProcessErr::Continue => (),
+                                ProcessErr::Continue => {},
                                 ProcessErr::Exit => break,
                                 ProcessErr::Error(io_err) => {
                                     eprintln!("ERROR: {}", io_err);

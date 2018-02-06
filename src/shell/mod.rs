@@ -56,9 +56,9 @@ impl From<io::Error> for ProcessErr {
     }
 }
 
-type ProcessResult<A> = result::Result<A, ProcessErr>;
+type Result<A> = result::Result<A, ProcessErr>;
 
-fn process(env: &Env, c: Process) -> ProcessResult<Command> {
+fn process(env: &Env, c: Process) -> Result<Command> {
     match c.name {
         Program::Cd => {
             cd(env, c.args);
@@ -75,7 +75,7 @@ fn process(env: &Env, c: Process) -> ProcessResult<Command> {
     }
 }
 
-fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> ProcessResult<Command> {
+fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> Result<Command> {
     let mut left_command = process(env, left)?;
     let mut right_command = expr(env, right)?;
     match op {
@@ -109,14 +109,14 @@ fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> ProcessResul
     }
 }
 
-fn redirect(env: &Env, e: Expr, file: String) -> ProcessResult<Command> {
+fn redirect(env: &Env, e: Expr, file: String) -> Result<Command> {
     let mut command = expr(env, e)?;
     let file = File::create(file)?;
     command.stdout(file);
     Ok(command)
 }
 
-fn expr(env: &Env, e: Expr) -> ProcessResult<Command> {
+fn expr(env: &Env, e: Expr) -> Result<Command> {
     match e {
         Expr::Base(c) => process(env, c),
         Expr::Sequence { left, op, right } => sequence(env, left, op, *right),
@@ -124,7 +124,7 @@ fn expr(env: &Env, e: Expr) -> ProcessResult<Command> {
     }
 }
 
-pub fn exec(env: &Env, e: Expr) -> ProcessResult<ExitStatus> {
+pub fn exec(env: &Env, e: Expr) -> Result<ExitStatus> {
     let mut command = expr(env, e)?;
     let mut child = command.spawn()?;
     let exit_code = child.wait()?;
