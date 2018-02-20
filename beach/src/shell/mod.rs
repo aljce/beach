@@ -1,47 +1,12 @@
 use std::result;
 use std::io;
 use std::process::{Command, Stdio, ExitStatus};
-use std::cell::RefCell;
-use std::path::PathBuf;
-use std::env::current_dir;
 use std::fs::File;
 
 pub mod expr;
+pub mod builtins;
 pub use self::expr::*;
-
-/// The mutable state that backs a shell (environment variables, current directory, ...)
-pub struct Env {
-    current_dir: RefCell<PathBuf>
-}
-
-impl Env {
-    pub fn new() -> Env {
-        let dir = current_dir().expect("ERROR: Insufficient permissions to read master process current directory");
-        Env {
-            current_dir: RefCell::new(dir)
-        }
-    }
-}
-
-fn cd(env: &Env, args: Vec<String>) {
-    // TODO: Look into how to use cd & exit programs so this hack isnt needed
-    let number_args = args.len();
-    if number_args != 1 {
-        eprintln!("ERROR: cd requires exactly 1 argument you gave [{}]", number_args)
-    } else {
-        let path = PathBuf::from(&args[0]);
-        if path.is_dir() {
-            let mut buf = env.current_dir.borrow_mut();
-            if path.is_absolute() {
-                *buf = path;
-            } else {
-                *buf = buf.join(path);
-            }
-        } else {
-            eprintln!("ERROR: cd requires the argument to be a directory and to be accessable")
-        }
-    }
-}
+pub use self::builtins::*;
 
 pub enum ProcessErr {
     Continue,
@@ -59,20 +24,30 @@ impl From<io::Error> for ProcessErr {
 type Result<A> = result::Result<A, ProcessErr>;
 
 fn process(env: &Env, c: Process) -> Result<Command> {
-    match c.name {
-        Program::Cd => {
-            cd(env, c.args);
-            Err(ProcessErr::Continue)
+    let prog = match c.name {
+        Program::Cd => cd,
+        Program::NewFS => new_fs,
+        Program::Mount => mount,
+        Program::BlockMap => block_map,
+        Program::AllocBlock => alloc_block,
+        Program::FreeBlock => free_block,
+        Program::INodeMap => inode_map,
+        Program::AllocINode => alloc_inode,
+        Program::FreeINode => free_inode,
+        Program::Unmount => unmount,
+        Program::Exit => {
+            return Err(ProcessErr::Exit)
         }
-        Program::Exit => Err(ProcessErr::Exit),
         Program::Other(name) => {
             let mut command = Command::new(name);
             command
                 .args(c.args)
-                .current_dir(env.current_dir.borrow().clone());
-            Ok(command)
+                .current_dir(env.current_dir());
+            return Ok(command)
         }
-    }
+    };
+    prog(env, c.args);
+    Err(ProcessErr::Continue)
 }
 
 fn sequence(env: &Env, left: Process, op: Operator, right: Expr) -> Result<Command> {

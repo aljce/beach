@@ -8,30 +8,50 @@ use nom::{space, multispace, Err, ErrorKind};
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Program<'a> {
     Cd,
+    NewFS,
+    Mount,
+    BlockMap,
+    AllocBlock,
+    FreeBlock,
+    INodeMap,
+    AllocINode,
+    FreeINode,
+    Unmount,
     Exit,
     Other(&'a str)
 }
 
-impl<'a> AsRef<OsStr> for Program<'a> {
-    fn as_ref(&self) -> &OsStr {
+impl<'a> AsRef<str> for Program<'a> {
+    fn as_ref(&self) -> &str {
         use self::Program::*;
-        let s = match *self {
+        match *self {
             Cd => "cd",
+            NewFS => "newfs",
+            Mount => "mount",
+            BlockMap => "blockmap",
+            AllocBlock => "alloc_block",
+            FreeBlock => "free_block",
+            INodeMap => "inode_map",
+            AllocINode => "alloc_inode",
+            FreeINode => "free_inode",
+            Unmount => "unmount",
             Exit => "exit",
             Other(name) => name
-        };
+        }
+    }
+}
+
+impl<'a> AsRef<OsStr> for Program<'a> {
+    fn as_ref(&self) -> &OsStr {
+        let s : &str = self.as_ref();
         s.as_ref()
     }
 }
 
 impl<'a> Display for Program<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
-        use self::Program::*;
-        match *self {
-            Cd => write!(format, "cd"),
-            Exit => write!(format, "exit"),
-            Other(name) => write!(format, "{}", name)
-        }
+        let s : &str = self.as_ref();
+        write!(format, "{}", s)
     }
 }
 
@@ -97,7 +117,7 @@ impl<'a> Display for Expr<'a> {
     }
 }
 
-const DISALLOWED_CHARS : &'static str = " |>\\\t\n\r\"";
+const DISALLOWED_CHARS : &'static str = " |&>\\\t\n\r\"";
 
 named!(
     byte_string<&[u8]>,
@@ -143,8 +163,17 @@ named!(
 named!(
     program<Program>,
     alt_complete!(
-        value!(Program::Cd,   tag_s!("cd")) |
-        value!(Program::Exit, tag_s!("exit")) |
+        value!(Program::Cd,         tag_s!("cd")) |
+        value!(Program::NewFS,      tag_s!("newfs")) |
+        value!(Program::Mount,      tag_s!("mount")) |
+        value!(Program::BlockMap,   tag_s!("blockmap")) |
+        value!(Program::AllocBlock, tag_s!("alloc_block")) |
+        value!(Program::FreeBlock,  tag_s!("free_block")) |
+        value!(Program::INodeMap,   tag_s!("inode_map")) |
+        value!(Program::AllocINode, tag_s!("alloc_inode")) |
+        value!(Program::FreeINode,  tag_s!("free_inode")) |
+        value!(Program::Unmount,    tag_s!("unmount")) |
+        value!(Program::Exit,       tag_s!("exit")) |
         map!(string, Program::Other)
     )
 );
