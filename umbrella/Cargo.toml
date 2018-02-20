@@ -5,3 +5,5 @@ authors = ["Kyle McKean <mckean.kylej@gmail.com>"]
 
 [dependencies]
 nom = "3.*"
+bitflags = "1.0"
+bit-vec = "0.4.*"
