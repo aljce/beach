@@ -124,6 +124,29 @@ impl<'a> DeviceConfig<'a> {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct BlockNumber {
+    number: u64
+}
+
+impl BlockNumber {
+    pub fn new(number: u64) -> BlockNumber {
+        BlockNumber { number }
+    }
+}
+
+impl Debug for BlockNumber {
+    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self)
+    }
+}
+
+impl Display for BlockNumber {
+    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
+        write!(f, "{}", self.number)
+    }
+}
+
 pub struct BlockDevice<'a> {
     config: DeviceConfig<'a>,
     handle: File
@@ -146,9 +169,9 @@ impl<'a> BlockDevice<'a> {
         Ok(BlockDevice { config, handle })
     }
 
-    fn seek(&mut self, block_num: u64, buf: &mut [u8]) -> Result<()> {
+    fn seek(&mut self, block_num: BlockNumber, buf: &mut [u8]) -> Result<()> {
         let block_count = self.config.block_count;
-        if block_count <= block_num {
+        if block_count <= block_num.number {
             let err_msg = format!(
                 "create: block_count [{}] is greater than the requested block number [{}]",
                 block_count,
@@ -166,18 +189,18 @@ impl<'a> BlockDevice<'a> {
             );
             return Err(Error::Size(err_msg))
         }
-        let seek_pos = SeekFrom::Start(block_num * self.config.path.block_size as u64);
+        let seek_pos = SeekFrom::Start(block_num.number * self.config.path.block_size as u64);
         self.handle.seek(seek_pos)?;
         Ok(())
     }
 
-    pub fn read(&mut self, block_num: u64, buf: &mut [u8]) -> Result<()> {
+    pub fn read(&mut self, block_num: BlockNumber, buf: &mut [u8]) -> Result<()> {
         self.seek(block_num, buf)?;
         self.handle.read_exact(buf)?;
         Ok(())
     }
 
-    pub fn write(&mut self, block_num: u64, buf: &mut [u8]) -> Result<()> {
+    pub fn write(&mut self, block_num: BlockNumber, buf: &mut [u8]) -> Result<()> {
         self.seek(block_num, buf)?;
         self.handle.write_all(buf)?;
         Ok(())
@@ -233,8 +256,8 @@ mod tests {
         let mut block_device = BlockDevice::create("mydev.128.dev", 16).unwrap();
         let mut nums = (0..128).collect::<Vec<_>>();
         let mut out  = vec![0; 128];
-        block_device.write(1, nums.as_mut_slice()).unwrap();
-        block_device.read(1, out.as_mut_slice()).unwrap();
+        block_device.write(BlockNumber::new(1), nums.as_mut_slice()).unwrap();
+        block_device.read(BlockNumber::new(1), out.as_mut_slice()).unwrap();
         assert_eq!(nums, out);
     }
 }
