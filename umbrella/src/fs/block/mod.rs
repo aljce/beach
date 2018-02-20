@@ -1,6 +1,8 @@
 use std::time::SystemTime;
 use bit_vec::BitVec;
 
+pub mod device;
+
 bitflags! {
     struct BlockFlags: u8 {
         const SYNCED = 0b10000000;
