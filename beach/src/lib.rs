@@ -2,6 +2,7 @@ extern crate itertools;
 #[macro_use]
 extern crate nom;
 extern crate rustyline;
+extern crate umbrella;
 
 use std::env::home_dir;
 use std::fs::File;

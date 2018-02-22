@@ -21,8 +21,12 @@ pub struct MasterBlock {
     flags:       BlockFlags,
 }
 
+// Theoretically this should be a doubly linked free list as the asymptotics on all the operations
+// I want to support would be optimal. I choose a bitvec even though its asymptotics are worse. I
+// did this because bitvecs have much lower constants on all the operations in question.
 pub struct BlockMap {
-    block_map: BitVec
+    block_map: BitVec,
+
 }
 
 bitflags! {
@@ -52,4 +56,8 @@ pub struct INode {
     perms:      Permissions,
     level:      u8,
     block_ptrs: [BlockNumber; 16]
+}
+
+pub struct INodeMap {
+    inode_map: Vec<INode>
 }

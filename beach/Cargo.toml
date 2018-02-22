@@ -7,4 +7,4 @@ authors = ["Kyle McKean <mckean.kylej@gmail.com>"]
 itertools = "0.*"
 nom = "3.*"
 rustyline = { git = "https://github.com/kkawakam/rustyline" }
-
+umbrella = { path = "../umbrella" }

@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::env::current_dir;
 
+use umbrella::block::device::{BlockNumber, BlockDevice};
+
 pub mod parse;
 pub use self::parse::*;
 
@@ -74,8 +76,7 @@ pub fn alloc_block(_env: &Env, _args: Args) {
 pub fn free_block(_env: &Env, args: Args) {
     let parser = Parser::new(vec![Argument::nat()]);
     args.parse_explain("free_block", parser, |parsed| {
-        // let block_number = BlockNumber::new(parsed.at(0).nat());
-        let _block_number = parsed.at(0).nat();
+        let _block_number = BlockNumber::new(parsed.at(0).nat());
         eprintln!("unimplemented");
     })
 }
@@ -95,8 +96,7 @@ pub fn alloc_inode(_env: &Env, args: Args) {
 pub fn free_inode(_env: &Env, args: Args) {
     let parser = Parser::new(vec![Argument::nat()]);
     args.parse_explain("free_inode", parser, |parsed| {
-        // let block_number = BlockNumber::new(parsed.at(0).nat());
-        let _block_number = parsed.at(0).nat();
+        let _block_number = BlockNumber::new(parsed.at(0).nat());
         eprintln!("unimplemented");
     })
 

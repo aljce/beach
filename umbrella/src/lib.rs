@@ -8,5 +8,5 @@ extern crate bincode;
 extern crate bitflags;
 extern crate bit_vec;
 
-pub mod fs;
+pub mod block;
 
