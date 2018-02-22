@@ -114,7 +114,7 @@ pub fn mount(env: &Env, args: Args) {
 
 pub fn block_map(env: &Env, _args: Args) {
     env.with_fs(|fs| {
-        println!("{}", fs.block_map)
+        print!("{}", fs.block_map)
     })
 }
 

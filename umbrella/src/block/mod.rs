@@ -56,7 +56,6 @@ impl Display for BlockMap {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         let mut i = 0;
         let mut s = String::new();
-        s.push('\n');
         for b in self.vec.iter() {
             s.push(if b { '1'} else { '0' });
             if i != 0 && i % 8 == 0 {
@@ -69,7 +68,10 @@ impl Display for BlockMap {
                 i = 0;
             }
         }
-        writeln!(f, "{}", s)
+        if i != 0 {
+            writeln!(f, "{}", s)?
+        }
+        Ok(())
     }
 }
 
@@ -150,7 +152,7 @@ impl FileSystem {
     pub fn write<'a>(&self, device: &mut BlockDevice<'a>) -> device::Result<()> {
         let mb = &self.master_block;
         let mut mb_vec = vec![0; mb.block_size as usize];
-        serialize_into(&mut mb_vec, &mb)?;
+        serialize_into(&mut mb_vec[..], &mb)?;
         device.write(MASTER_BLOCK_NUMBER, &mut mb_vec[..])?;
 
         let mut bm_vec = vec![0u8; mb.block_size as usize];
@@ -171,11 +173,11 @@ impl FileSystem {
             }
             device.write(block_number, &mut bm_vec)?;
         }
-        assert!(block_number < mb.inode_map);
+        assert!(block_number <= mb.inode_map);
         block_number = mb.inode_map;
         for node in self.inode_map.vec.iter() {
             let mut node_bytes = vec![0u8; mb.block_size as usize];
-            serialize_into(&mut node_bytes, &node)?;
+            serialize_into(&mut node_bytes[..], &node)?;
             device.write(block_number, &mut node_bytes)?;
             block_number.next();
         }
@@ -195,7 +197,7 @@ impl FileSystem {
             bit_vec.extend(BitVec::from_bytes(&bm_vec));
         }
         let block_map = BlockMap { vec: bit_vec };
-        assert!(block_number < master_block.inode_map);
+        assert!(block_number <= master_block.inode_map);
         let mut nodes = vec![];
         let mut block_number = master_block.inode_map;
         for _ in 0 .. master_block.inode_count {
