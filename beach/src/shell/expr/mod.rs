@@ -5,6 +5,9 @@ use std::ffi::OsStr;
 use itertools::Itertools;
 use nom::{space, multispace, Err, ErrorKind};
 
+pub mod args;
+pub use self::args::*;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Program<'a> {
     Cd,
@@ -58,12 +61,12 @@ impl<'a> Display for Program<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Process<'a> {
     pub name: Program<'a>,
-    pub args: Vec<String>
+    pub args: Args
 }
 
 impl<'a> Display for Process<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
-        let rest = self.args.iter().join(" ");
+        let rest = self.args.vec.iter().join(" ");
         write!(format, "{} {}", self.name, rest)
     }
 }
@@ -184,10 +187,12 @@ named!(
 );
 
 named!(
-    args<Vec<String>>,
+    args<Args>,
     map!(
         opt!(strict_args),
-        |res| res.unwrap_or(vec![])
+        |res| Args {
+            vec: res.unwrap_or(vec![])
+        }
     )
 );
 
@@ -288,43 +293,48 @@ mod tests {
         parses_to(super::esc("foobar ".as_bytes()), "foobar".to_string());
         parses_to(super::esc("foo\\ bar ".as_bytes()), "foo bar".to_string());
     }
+
+    fn empty_args() -> Args {
+        Args { vec: vec![] }
+    }
+
     #[test]
     fn command() {
         let cd = Expr::Base (
             Process {
                 name: Program::Cd,
-                args: vec![]
+                args: empty_args()
             }
         );
         total_to("cd", cd);
         let ping = Expr::Base(
             Process {
                 name: Program::Other("ping"),
-                args: vec![]
+                args: empty_args()
             }
         );
         total_to("ping", ping);
+        let args = Args {
+            vec: vec!["-t".to_string(), "5".to_string()]
+        };
         let ping_args = Expr::Base(
-            Process {
-                name: Program::Other("ping"),
-                args: vec!["-t".to_string(), "5".to_string()]
-            }
+            Process { name: Program::Other("ping"), args }
         );
         total_to("ping -t 5", ping_args);
     }
 
     #[test]
     fn total() {
-        let find = Process {
-            name: Program::Other("find"),
-            args: vec![ "-t".to_string()
-                      , "f".to_string()
-                      , "--name".to_string()
-                      , "result".to_string() ]
+        let args = Args {
+            vec: vec![ "-t".to_string()
+                     , "f".to_string()
+                     , "--name".to_string()
+                     , "result".to_string() ]
         };
+        let find = Process { name: Program::Other("find"), args };
         let cat = Process {
             name: Program::Other("cat"),
-            args: vec![]
+            args: empty_args()
         };
         let comm = Expr::Sequence {
             left: find,

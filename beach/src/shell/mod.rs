@@ -4,9 +4,7 @@ use std::process::{Command, Stdio, ExitStatus};
 use std::fs::File;
 
 pub mod expr;
-pub mod builtins;
 pub use self::expr::*;
-pub use self::builtins::*;
 
 pub enum ProcessErr {
     Continue,
@@ -41,7 +39,7 @@ fn process(env: &Env, c: Process) -> Result<Command> {
         Program::Other(name) => {
             let mut command = Command::new(name);
             command
-                .args(c.args)
+                .args(c.args.vec)
                 .current_dir(env.current_dir());
             return Ok(command)
         }
