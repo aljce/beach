@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::env::current_dir;
 
 use umbrella::block::device::{BlockNumber, BlockDevice};
@@ -50,18 +50,30 @@ pub fn new_fs(_env: &Env, args: Args) {
         ]
     );
     args.parse_explain("newfs", parser, |parsed| {
-        let _file_name = parsed.at(0).string();
-        let _block_count = parsed.at(1).nat();
-        let _block_size = parsed.optional(2).nat();
-        eprintln!("unimplemented");
+        let file_name = parsed.at(0).string();
+        let block_count = parsed.at(1).nat();
+        let block_size = parsed.optional(2).nat().map(|n| n as u16);
+        match BlockDevice::create(&file_name, block_count, block_size) {
+            Ok(_) => {}
+            Err(err) => eprintln!("{}", err)
+        }
     })
 }
 
 pub fn mount(_env: &Env, args: Args) {
     let parser = Parser::new(vec![Argument::string()]);
     args.parse_explain("mount", parser, |parsed| {
-        let _file_name = parsed.at(0).string();
-        eprintln!("unimplemented");
+        let file_name = parsed.at(0).string();
+        if ! Path::new(&file_name).exists() {
+            eprintln!("The device: {0} does not exist. Try running 'newfs {0} 128' first.", file_name);
+            return
+        }
+        match BlockDevice::open(&file_name) {
+            Ok(_device) => {
+                println!("open")
+            }
+            Err(err) => eprintln!("{}", err)
+        }
     })
 }
 

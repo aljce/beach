@@ -42,20 +42,8 @@ impl From<io::Error> for Error {
 
 type Result<A> = result::Result<A, Error>;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct DevicePath<'a> {
-    file:        &'a Path,
-    block_size:  u16
-}
-
-impl<'a> Into<PathBuf> for DevicePath<'a> {
-    fn into(self) -> PathBuf {
-        PathBuf::from(format!("{}.{}.dev", self.file.to_string_lossy(), self.block_size))
-    }
-}
-
 named!(
-    device_path<DevicePath>,
+    file_components<(&Path, u16)>,
     do_parse!(
         file: map!(
             take_till_s!(|c| c == b'.'),
@@ -67,34 +55,33 @@ named!(
             FromStr::from_str
         ) >>
         tag!(".dev") >>
-        (DevicePath { file, block_size })
+        ((file, block_size))
     )
 );
 
-impl<'a> DevicePath<'a> {
-    pub fn new(s: &'a str) -> Result<DevicePath<'a>> {
-        let res = device_path(s.as_bytes()).to_result()?;
-        Ok(res)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceConfig<'a> {
-    path:        DevicePath<'a>,
+    path:        &'a Path,
+    block_size:  u16,
     block_count: u64
 }
 
 impl<'a> DeviceConfig<'a> {
-    pub fn new(s: &'a str) -> Result<DeviceConfig<'a>>  {
-        let dev_path = DevicePath::new(s)?;
-        Ok(DeviceConfig {
-            path: dev_path,
+    pub fn new(s: &'a str) -> DeviceConfig<'a>  {
+        DeviceConfig {
+            path:        Path::new(s),
+            block_size:  0,
             block_count: 0
-        })
+        }
+    }
+
+    pub fn parse(s: &'a str) -> Result<DeviceConfig<'a>> {
+        let (path, block_size) = file_components(s.as_bytes()).to_result()?;
+        Ok(DeviceConfig { path, block_size, block_count: 0 })
     }
 
     pub fn block_size(mut self, block_size: u16) -> Self {
-        self.path.block_size = block_size;
+        self.block_size = block_size;
         self
     }
 
@@ -103,24 +90,8 @@ impl<'a> DeviceConfig<'a> {
         self
     }
 
-    pub fn create(self) -> Result<BlockDevice<'a>> {
-        if self.block_count <= 0 {
-            let err_msg = format!(
-                "create: block_count [{}] is less than 1",
-                self.block_count
-            );
-            return Err(Error::Size(err_msg))
-        }
-        let file : PathBuf = self.path.clone().into();
-        let mut handle = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(file)?;
-        let seek_pos = SeekFrom::Start(self.path.block_size as u64 * self.block_count - 1);
-        handle.seek(seek_pos)?;
-        handle.write(&mut [0])?;
-        Ok(BlockDevice { config: self, handle })
+    pub fn file(&self) -> PathBuf {
+        PathBuf::from(format!("{}.{}.dev", self.path.to_string_lossy(), self.block_size))
     }
 }
 
@@ -153,18 +124,47 @@ pub struct BlockDevice<'a> {
 }
 
 impl<'a> BlockDevice<'a> {
-    pub fn create(file: &'a str, count: u64) -> Result<BlockDevice<'a>> {
-        DeviceConfig::new(file)?.block_count(count).create()
+    pub fn create(path: &'a str, count: u64, optional_size: Option<u16>) -> Result<BlockDevice<'a>>
+    {
+        let size = optional_size.unwrap_or(1024);
+        let config = DeviceConfig::new(path)
+            .block_count(count)
+            .block_size(size);
+        if config.block_count <= 0 {
+            let err_msg = format!(
+                "create: block_count [{}] is less than 1",
+                config.block_count
+            );
+            return Err(Error::Size(err_msg))
+        }
+        if config.block_size <= 0 {
+            let err_msg = format!(
+                "create: block_size [{}] is less than 1",
+                config.block_size
+            );
+            return Err(Error::Size(err_msg))
+        }
+        let file = config.file();
+        let mut handle = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(file)?;
+        let seek_pos = SeekFrom::Start(config.block_size as u64 * config.block_count - 1);
+        handle.seek(seek_pos)?;
+        handle.write(&mut [0])?;
+        Ok(BlockDevice { config, handle })
     }
 
-    pub fn open(file: &'a str) -> Result<BlockDevice<'a>> {
-        let mut config = DeviceConfig::new(file)?;
+
+    pub fn open(path: &'a str) -> Result<BlockDevice<'a>> {
+        let mut config = DeviceConfig::parse(path)?;
         let handle = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(file)?;
+            .open(config.file())?;
         let file_len = handle.metadata()?.len();
-        let block_size = config.path.block_size;
+        let block_size = config.block_size;
         config.block_count = file_len / block_size as u64;
         Ok(BlockDevice { config, handle })
     }
@@ -179,7 +179,7 @@ impl<'a> BlockDevice<'a> {
             );
             return Err(Error::Size(err_msg))
         }
-        let block_size = self.config.path.block_size;
+        let block_size = self.config.block_size;
         let buf_len = buf.len();
         if block_size as usize != buf_len {
             let err_msg = format!(
@@ -189,7 +189,7 @@ impl<'a> BlockDevice<'a> {
             );
             return Err(Error::Size(err_msg))
         }
-        let seek_pos = SeekFrom::Start(block_num.number * self.config.path.block_size as u64);
+        let seek_pos = SeekFrom::Start(block_num.number * self.config.block_size as u64);
         self.handle.seek(seek_pos)?;
         Ok(())
     }
@@ -234,26 +234,20 @@ mod tests {
     }
 
     #[test]
-    fn block_device_deserialize() {
-        let block_dev = DevicePath {
-            file: Path::new("mydev"),
-            block_size: 1024
-        };
-        parses_to(super::device_path("mydev.1024.dev".as_bytes()), block_dev)
+    fn file_components_deserialize() {
+        let device_path = (Path::new("mydev"), 1024);
+        parses_to(super::file_components("mydev.1024.dev".as_bytes()), device_path)
     }
 
     #[test]
-    fn block_device_serialize() {
-        let block_dev : PathBuf = DevicePath {
-            file: Path::new("mydev"),
-            block_size: 1024
-        }.into();
-        assert_eq!(block_dev, PathBuf::from("mydev.1024.dev"))
+    fn file_components_serialize() {
+        let file = DeviceConfig::new("mydev").block_size(1024).file();
+        assert_eq!(file, PathBuf::from("mydev.1024.dev"))
     }
-    #[test]
 
+    #[test]
     fn block_write_read() {
-        let mut block_device = BlockDevice::create("mydev.128.dev", 16).unwrap();
+        let mut block_device = BlockDevice::create("mydev", 16, Some(128)).unwrap();
         let mut nums = (0..128).collect::<Vec<_>>();
         let mut out  = vec![0; 128];
         block_device.write(BlockNumber::new(1), nums.as_mut_slice()).unwrap();
