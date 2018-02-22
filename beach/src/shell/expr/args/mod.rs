@@ -51,11 +51,16 @@ pub fn new_fs(_env: &Env, args: Args) {
         let _file_name = parsed.at(0).string();
         let _block_count = parsed.at(1).nat();
         let _block_size = parsed.optional(2).nat();
+        eprintln!("unimplemented");
     })
 }
 
-pub fn mount(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn mount(_env: &Env, args: Args) {
+    let parser = Parser::new(vec![Argument::string()]);
+    args.parse_explain("mount", parser, |parsed| {
+        let _file_name = parsed.at(0).string();
+        eprintln!("unimplemented");
+    })
 }
 
 pub fn block_map(_env: &Env, _args: Args) {
@@ -66,20 +71,35 @@ pub fn alloc_block(_env: &Env, _args: Args) {
     eprintln!("unimplemented");
 }
 
-pub fn free_block(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn free_block(_env: &Env, args: Args) {
+    let parser = Parser::new(vec![Argument::nat()]);
+    args.parse_explain("free_block", parser, |parsed| {
+        // let block_number = BlockNumber::new(parsed.at(0).nat());
+        let _block_number = parsed.at(0).nat();
+        eprintln!("unimplemented");
+    })
 }
 
 pub fn inode_map(_env: &Env, _args: Args) {
     eprintln!("unimplemented");
 }
 
-pub fn alloc_inode(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn alloc_inode(_env: &Env, args: Args) {
+    let parser = Parser::new(vec![Argument::string()]);
+    args.parse_explain("alloc_inode", parser, |parsed| {
+        let _inode_type = parsed.at(0).string();
+        eprintln!("unimplemented");
+    })
 }
 
-pub fn free_inode(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn free_inode(_env: &Env, args: Args) {
+    let parser = Parser::new(vec![Argument::nat()]);
+    args.parse_explain("free_inode", parser, |parsed| {
+        // let block_number = BlockNumber::new(parsed.at(0).nat());
+        let _block_number = parsed.at(0).nat();
+        eprintln!("unimplemented");
+    })
+
 }
 
 pub fn unmount(_env: &Env, _args: Args) {
