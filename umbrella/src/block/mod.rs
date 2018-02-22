@@ -13,7 +13,7 @@ bitflags! {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MasterBlock {
     block_size:  u16,
     block_count: u64,
@@ -49,7 +49,6 @@ impl BlockMap {
             vec: BitVec::from_elem(block_count as usize, false)
         }
     }
-    
 }
 
 impl Display for BlockMap {
@@ -58,7 +57,7 @@ impl Display for BlockMap {
         let mut s = String::new();
         for b in self.vec.iter() {
             s.push(if b { '1'} else { '0' });
-            if i != 0 && i % 8 == 0 {
+            if i != 0 && i % 7 == 0 {
                 s.push('|');
             }
             i += 1;
@@ -136,16 +135,20 @@ pub struct FileSystem {
     pub inode_map:    INodeMap
 }
 
-
 impl FileSystem {
     pub fn new<'a>(device: &BlockDevice<'a>) -> FileSystem {
+        const INODE_COUNT : u16 = 8;
         let block_size = device.config.block_size;
         let block_count = device.config.block_count;
-        const INODE_COUNT : u16 = 8;
+        let mut block_map = BlockMap::new(block_count);
+        let block_map_blocks = (block_count as usize / block_size as usize) / 8;
+        for i in 0 .. 2 + block_map_blocks + INODE_COUNT as usize {
+            block_map.vec.set(i, true);
+        }
         FileSystem {
             master_block: MasterBlock::new(block_size, block_count, INODE_COUNT),
-            block_map:    BlockMap::new(block_count),
-            inode_map:    INodeMap::new(INODE_COUNT)
+            inode_map:    INodeMap::new(INODE_COUNT),
+            block_map
         }
     }
 
@@ -209,6 +212,16 @@ impl FileSystem {
         }
         let inode_map = INodeMap { vec: nodes };
         Ok(FileSystem { master_block, block_map, inode_map })
+    }
+
+    pub fn write_sync_status(&mut self, device: &mut BlockDevice, status: bool) -> device::Result<()> {
+        let mut master_block = self.master_block.clone();
+        master_block.flags.set(BlockFlags::SYNCED, status);
+        let mut mb_vec = vec![0; master_block.block_size as usize];
+        serialize_into(&mut mb_vec[..], &master_block)?;
+        device.write(MASTER_BLOCK_NUMBER, &mut mb_vec[..])?;
+        self.master_block = master_block;
+        Ok(())
     }
 }
 

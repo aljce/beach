@@ -99,6 +99,7 @@ pub fn mount(env: &Env, args: Args) {
             Ok(device) => {
                 match FileSystem::read(device) {
                     Ok(fs) => {
+                        // fs.write_sync_status(&mut device, true);
                         let mut cur_fs = env.current_fs.borrow_mut();
                         *cur_fs = Some(fs);
                     }
