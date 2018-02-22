@@ -5,9 +5,11 @@ use std::result;
 use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::fs::{File, OpenOptions};
 use nom::{Err, digit};
+use bincode;
 
 pub enum Error {
     Parse(Err),
+    Bincode(Box<bincode::ErrorKind>),
     IO(io::Error),
     Size(String)
 }
@@ -21,9 +23,10 @@ impl Debug for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
         match *self {
-            Error::Parse(ref err) => write!(f, "Parse error: {}", err),
-            Error::IO(ref err)    => write!(f, "{}", err),
-            Error::Size(ref err)  => write!(f, "{}", err)
+            Error::Parse(ref err)   => write!(f, "Parse error: {}", err),
+            Error::Bincode(ref err) => write!(f, "(de)serialization error: {}", err),
+            Error::IO(ref err)      => write!(f, "{}", err),
+            Error::Size(ref err)    => write!(f, "{}", err)
         }
     }
 }
@@ -34,13 +37,19 @@ impl From<Err> for Error {
     }
 }
 
+impl From<Box<bincode::ErrorKind>> for Error {
+    fn from(bincode_err: Box<bincode::ErrorKind>) -> Error {
+        Error::Bincode(bincode_err)
+    }
+}
+
 impl From<io::Error> for Error {
     fn from(io_err: io::Error) -> Error {
         Error::IO(io_err)
     }
 }
 
-type Result<A> = result::Result<A, Error>;
+pub type Result<A> = result::Result<A, Error>;
 
 named!(
     file_components<(&Path, u16)>,
@@ -61,9 +70,9 @@ named!(
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceConfig<'a> {
-    path:        &'a Path,
-    block_size:  u16,
-    block_count: u64
+        path:        &'a Path,
+    pub block_size:  u16,
+    pub block_count: u64
 }
 
 impl<'a> DeviceConfig<'a> {
@@ -104,6 +113,10 @@ impl BlockNumber {
     pub fn new(number: u64) -> BlockNumber {
         BlockNumber { number }
     }
+
+    pub fn next(&mut self) {
+        self.number += 1;
+    }
 }
 
 impl Debug for BlockNumber {
@@ -118,9 +131,11 @@ impl Display for BlockNumber {
     }
 }
 
+pub const MASTER_BLOCK_NUMBER : BlockNumber = BlockNumber { number: 1 };
+
 pub struct BlockDevice<'a> {
-    config: DeviceConfig<'a>,
-    handle: File
+    pub config: DeviceConfig<'a>,
+        handle: File
 }
 
 impl<'a> BlockDevice<'a> {
