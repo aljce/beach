@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::env::current_dir;
 
 use umbrella::block::device::{BlockNumber, BlockDevice};
-use umbrella::block::{FileSystem, Mount};
+use umbrella::block::{INodeFlags, FileSystem, Mount};
 
 pub mod parse;
 pub use self::parse::*;
@@ -154,23 +154,47 @@ pub fn free_block(env: &Env, args: Args) {
     })
 }
 
-pub fn inode_map(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
-}
-
-pub fn alloc_inode(_env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::string()]);
-    args.parse_explain("alloc_inode", parser, |parsed| {
-        let _inode_type = parsed.at(0).string();
-        eprintln!("unimplemented");
+pub fn inode_map(env: &Env, _args: Args) {
+    env.with_fs(|fs| {
+        print!("{}", fs.inode_map);
+        io::stdout().flush().unwrap()
     })
 }
 
-pub fn free_inode(_env: &Env, args: Args) {
+pub fn alloc_inode(env: &Env, args: Args) {
+    let parser = Parser::new(vec![Argument::string()]);
+    args.parse_explain("alloc_inode", parser, |parsed| {
+        let inode_type = parsed.at(0).string();
+        match INodeFlags::parse(&inode_type) {
+            Ok(flags) => {
+                env.with_fs(|fs| {
+                    match fs.inode_map.alloc(flags) {
+                        Some(block_number) => {
+                            println!("alloc [{}]", block_number)
+                        }
+                        None => {
+                            eprintln!("ERROR: No room left on device")
+                        }
+                    }
+                })
+            }
+            Err(_)    => {
+                eprintln!(
+                    "ERROR: Could not parse inode type [{}] please choose from [0fdsbD]",
+                    inode_type
+                )
+            }
+        }
+    })
+}
+
+pub fn free_inode(env: &Env, args: Args) {
     let parser = Parser::new(vec![Argument::nat()]);
     args.parse_explain("free_inode", parser, |parsed| {
-        let _block_number = BlockNumber::new(parsed.at(0).nat());
-        eprintln!("unimplemented");
+        let block_number = BlockNumber::new(parsed.at(0).nat());
+        env.with_fs(|fs| {
+            fs.inode_map.free(block_number)
+        })
     })
 
 }

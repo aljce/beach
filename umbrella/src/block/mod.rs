@@ -91,40 +91,72 @@ impl BlockMap {
     }
 }
 
+fn display_chunks<I, F>(items: I, display: F, f: &mut Formatter) -> Result<(), fmt::Error>
+where I: Iterator, F: Fn(I::Item) -> char
+{
+    let mut s = String::new();
+    let mut i = 0;
+    let mut flushed = true;
+    for item in items {
+        s.push(display(item));
+        i += 1;
+        if i != 64 {
+            flushed = false;
+            if i % 8 == 0 {
+                s.push('|');
+            }
+        } else {
+            writeln!(f, "{}", s)?;
+            s = String::new();
+            i = 0;
+            flushed = true;
+        }
+    }
+    if ! flushed {
+        writeln!(f, "{}", s)?
+    }
+    Ok(())
+
+}
+
 impl Display for BlockMap {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let mut s = String::new();
-        let mut i = 0;
-        let mut flushed = true;
-        for b in self.vec.iter() {
-            s.push(if b {'1'} else {'0'});
-            i += 1;
-            if i != 64 {
-                flushed = false;
-                if i % 8 == 0 {
-                    s.push('|');
-                }
-            } else {
-                writeln!(f, "{}", s)?;
-                s = String::new();
-                i = 0;
-                flushed = true;
-            }
+        fn display(b: bool) -> char {
+            if b {'1'} else {'0'}
         }
-        if ! flushed {
-            writeln!(f, "{}", s)?
-        }
-        Ok(())
+        display_chunks(self.vec.iter(), display, f)
     }
 }
 
+
 bitflags! {
     #[derive(Serialize, Deserialize)]
-    struct INodeFlags: u8 {
+    pub struct INodeFlags: u8 {
         const FREE = 0b1000_0000;
         const FILE = 0b0100_0000;
         const DIR  = 0b0010_0000;
         const LINK = 0b0001_0000;
+        const PTR  = 0b0000_1000;
+        const DATA = 0b0000_0100;
+    }
+}
+
+
+named!(
+    parse_inode_flags<INodeFlags>,
+    alt!(
+        value!(INodeFlags::FREE, char!('0')) |
+        value!(INodeFlags::FILE, char!('f')) |
+        value!(INodeFlags::LINK, char!('s')) |
+        value!(INodeFlags::PTR,  char!('d')) |
+        value!(INodeFlags::DATA, char!('D'))
+    )
+);
+
+impl INodeFlags {
+    pub fn parse(s: &str) -> device::Result<INodeFlags> {
+        let res = parse_inode_flags(s.as_bytes()).to_result()?;
+        Ok(res)
     }
 }
 
@@ -170,6 +202,57 @@ impl INodeMap {
         let now = SystemTime::now();
         let nodes = (0..inode_count).map(|num| INode::new(num, now)).collect::<Vec<_>>();
         INodeMap { vec: nodes }
+    }
+
+    fn find_free(&self) -> Option<usize> {
+        self.vec
+            .iter()
+            .enumerate()
+            .find(|&(_,inode)| inode.flags == INodeFlags::FREE)
+            .map(|(i,_)| i)
+    }
+
+    pub fn alloc(&mut self, flags: INodeFlags) -> Option<BlockNumber> {
+        self.find_free().map(|i| {
+            self.vec[i].flags = flags;
+            BlockNumber::new(i as u64)
+        })
+    }
+
+    pub fn free(&mut self, block_number: BlockNumber) {
+        self.vec[block_number.index()].flags = INodeFlags::FREE
+    }
+}
+
+impl Display for INodeMap {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        fn display(inode: &INode) -> char {
+            let flags = inode.flags;
+            if flags.contains(INodeFlags::FREE) {
+                '0'
+            } else if flags.contains(INodeFlags::FILE) {
+                'f'
+            } else if flags.contains(INodeFlags::DIR) {
+                'd'
+            } else if flags.contains(INodeFlags::LINK) {
+                's'
+            } else if flags.contains(INodeFlags::PTR) {
+                'b'
+            } else if flags.contains(INodeFlags::DATA) {
+                'D'
+            } else {
+                '0'
+            }
+            // match inode.flags {
+            //     INodeFlags::FREE => '0',
+            //     INodeFlags::FILE => 'f',
+            //     INodeFlags::DIR  => 'd',
+            //     INodeFlags::LINK => 's',
+            //     INodeFlags::PTR  => 'b',
+            //     INodeFlags::DATA => 'D'
+            // }
+        }
+        display_chunks(self.vec.iter(), display, f)
     }
 }
 

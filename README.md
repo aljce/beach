@@ -35,4 +35,7 @@ instructions for **Beach**.
 - blockmap
 - alloc_block
 - free_block
+- inode_map
+- alloc_inode
+- free_inode
 - unmount
