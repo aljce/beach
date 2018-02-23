@@ -117,6 +117,10 @@ impl BlockNumber {
     pub fn next(&mut self) {
         self.number += 1;
     }
+
+    pub fn index(&self) -> usize {
+        self.number as usize
+    }
 }
 
 impl Debug for BlockNumber {

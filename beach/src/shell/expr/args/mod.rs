@@ -31,10 +31,10 @@ impl Env {
     const NO_MOUNT_MSG : &'static str = "ERROR: No file system mounted, try running newfs then mount";
 
     pub fn with_fs<F>(&self, f: F)
-    where F: FnOnce(&FileSystem) -> ()
+    where F: FnOnce(&mut FileSystem) -> ()
     {
-        match *self.current_fs.borrow() {
-            Some(ref fs) => f(fs),
+        match *self.current_fs.borrow_mut() {
+            Some(ref mut fs) => f(fs),
             None => eprintln!("{}", Env::NO_MOUNT_MSG)
         }
     }
@@ -135,15 +135,22 @@ pub fn block_map(env: &Env, _args: Args) {
     })
 }
 
-pub fn alloc_block(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn alloc_block(env: &Env, _args: Args) {
+    env.with_fs(|fs| {
+        match fs.block_map.alloc() {
+            Some(block_number) => println!("alloc [{}]", block_number),
+            None => println!("ERROR: No room left on device")
+        }
+    })
 }
 
-pub fn free_block(_env: &Env, args: Args) {
+pub fn free_block(env: &Env, args: Args) {
     let parser = Parser::new(vec![Argument::nat()]);
     args.parse_explain("free_block", parser, |parsed| {
-        let _block_number = BlockNumber::new(parsed.at(0).nat());
-        eprintln!("unimplemented");
+        let block_number = BlockNumber::new(parsed.at(0).nat());
+        env.with_fs(|fs| {
+            fs.block_map.free(block_number)
+        })
     })
 }
 

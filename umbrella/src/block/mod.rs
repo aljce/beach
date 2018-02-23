@@ -35,6 +35,10 @@ impl MasterBlock {
         }
     }
 
+    pub fn block_map_blocks(&self) -> usize {
+        ((self.block_count / self.block_size as u64) / 8) as usize
+    }
+
     pub fn write(&self, device: &mut BlockDevice) -> device::Result<()> {
         let mut mb_vec = vec![0; self.block_size as usize];
         serialize_into(&mut mb_vec[..], &self)?;
@@ -54,14 +58,36 @@ impl MasterBlock {
 // I want to support would be optimal. I choose a bitvec even though its asymptotics are worse. I
 // did this because bitvecs have much lower constants on all the operations in question.
 pub struct BlockMap {
-    vec: BitVec,
+    vec:  BitVec,
+    free: Option<BlockNumber>
 }
 
 impl BlockMap {
     pub fn new(block_count: u64) -> BlockMap {
         BlockMap {
-            vec: BitVec::from_elem(block_count as usize, false)
+            vec: BitVec::from_elem(block_count as usize, false),
+            free: Some(BlockNumber::new(0))
         }
+    }
+
+    fn find_free(vec: &BitVec) -> Option<usize> {
+        vec.iter().enumerate().find(|&(_, b)| b == false).map(|(i, _)| i)
+    }
+
+    pub fn init(vec: BitVec) -> BlockMap {
+        let free = BlockMap::find_free(&vec);
+        BlockMap { vec, free: free.map(|i| BlockNumber::new(i as u64)) }
+    }
+
+    pub fn alloc(&mut self) -> Option<BlockNumber> {
+        BlockMap::find_free(&self.vec).map(|i| {
+            self.vec.set(i, true);
+            BlockNumber::new(i as u64)
+        })
+    }
+
+    pub fn free(&mut self, block_number: BlockNumber) {
+        self.vec.set(block_number.index(), false)
     }
 }
 
@@ -162,20 +188,15 @@ pub struct Mount {
 impl FileSystem {
     pub fn new(device: BlockDevice) -> FileSystem {
         const INODE_COUNT : u16 = 8;
-        println!("{:?}", device.config);
         let block_size = device.config.block_size;
         let block_count = device.config.block_count;
         let mut block_map = BlockMap::new(block_count);
-        let block_map_blocks = (block_count as usize / block_size as usize) / 8;
-        for i in 0 .. 2 + block_map_blocks + INODE_COUNT as usize {
+        let master_block = MasterBlock::new(block_size, block_count, INODE_COUNT);
+        for i in 0 .. 2 + master_block.block_map_blocks() + INODE_COUNT as usize {
             block_map.vec.set(i, true);
         }
-        FileSystem {
-            master_block: MasterBlock::new(block_size, block_count, INODE_COUNT),
-            inode_map:    INodeMap::new(INODE_COUNT),
-            block_map,
-            device
-        }
+        let inode_map = INodeMap::new(INODE_COUNT);
+        FileSystem { master_block, block_map, inode_map, device }
     }
 
     pub fn write(&mut self) -> device::Result<()> {
@@ -215,14 +236,14 @@ impl FileSystem {
         let mut master_block : MasterBlock = deserialize_from(&mb_vec[..])?;
         let mut bit_vec = BitVec::new();
         let mut block_number = master_block.block_map;
-        for _ in 0 .. 1 + master_block.block_count / master_block.block_size as u64 {
+        for _ in 0 .. 1 + master_block.block_map_blocks() {
             let mut bm_vec = vec![0; master_block.block_size as usize];
             device.read(block_number, &mut bm_vec)?;
             block_number.next();
             bit_vec.extend(BitVec::from_bytes(&bm_vec));
         }
         bit_vec.truncate(master_block.block_count as usize);
-        let block_map = BlockMap { vec: bit_vec };
+        let block_map = BlockMap::init(bit_vec);
         assert!(block_number <= master_block.inode_map);
         let mut nodes = vec![];
         let mut block_number = master_block.inode_map;
