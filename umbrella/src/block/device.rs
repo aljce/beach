@@ -1,5 +1,5 @@
 use std::str::{self, FromStr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::result;
 use std::io::{self, Read, Write, Seek, SeekFrom};
@@ -52,11 +52,11 @@ impl From<io::Error> for Error {
 pub type Result<A> = result::Result<A, Error>;
 
 named!(
-    file_components<(&Path, u16)>,
+    file_components<(PathBuf, u16)>,
     do_parse!(
         file: map!(
             take_till_s!(|c| c == b'.'),
-            |bytes| Path::new(str::from_utf8(bytes).unwrap())
+            |bytes| PathBuf::from(str::from_utf8(bytes).unwrap())
         ) >>
         char!('.') >>
         block_size: map_res!(
@@ -69,22 +69,22 @@ named!(
 );
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct DeviceConfig<'a> {
-        path:        &'a Path,
+pub struct DeviceConfig {
+        path:        PathBuf,
     pub block_size:  u16,
     pub block_count: u64
 }
 
-impl<'a> DeviceConfig<'a> {
-    pub fn new(s: &'a str) -> DeviceConfig<'a>  {
+impl DeviceConfig {
+    pub fn new(s: &str) -> DeviceConfig  {
         DeviceConfig {
-            path:        Path::new(s),
+            path:        PathBuf::from(s),
             block_size:  0,
             block_count: 0
         }
     }
 
-    pub fn parse(s: &'a str) -> Result<DeviceConfig<'a>> {
+    pub fn parse(s: &str) -> Result<DeviceConfig> {
         let (path, block_size) = file_components(s.as_bytes()).to_result()?;
         Ok(DeviceConfig { path, block_size, block_count: 0 })
     }
@@ -133,13 +133,13 @@ impl Display for BlockNumber {
 
 pub const MASTER_BLOCK_NUMBER : BlockNumber = BlockNumber { number: 1 };
 
-pub struct BlockDevice<'a> {
-    pub config: DeviceConfig<'a>,
+pub struct BlockDevice {
+    pub config: DeviceConfig,
         handle: File
 }
 
-impl<'a> BlockDevice<'a> {
-    pub fn create(path: &'a str, count: u64, optional_size: Option<u16>) -> Result<BlockDevice<'a>>
+impl BlockDevice {
+    pub fn create(path: &str, count: u64, optional_size: Option<u16>) -> Result<BlockDevice>
     {
         let size = optional_size.unwrap_or(1024);
         let config = DeviceConfig::new(path)
@@ -172,7 +172,7 @@ impl<'a> BlockDevice<'a> {
     }
 
 
-    pub fn open(path: &'a str) -> Result<BlockDevice<'a>> {
+    pub fn open(path: &str) -> Result<BlockDevice> {
         let mut config = DeviceConfig::parse(path)?;
         let handle = OpenOptions::new()
             .read(true)
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn file_components_deserialize() {
-        let device_path = (Path::new("mydev"), 1024);
+        let device_path = (PathBuf::from("mydev"), 1024);
         parses_to(super::file_components("mydev.1024.dev".as_bytes()), device_path)
     }
 

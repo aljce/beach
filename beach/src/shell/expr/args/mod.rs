@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::env::current_dir;
 
 use umbrella::block::device::{BlockNumber, BlockDevice};
-use umbrella::block::{FileSystem};
+use umbrella::block::{FileSystem, Mount};
 
 pub mod parse;
 pub use self::parse::*;
@@ -27,12 +27,24 @@ impl Env {
         self.current_dir.borrow().clone()
     }
 
+    const NO_MOUNT_MSG : &'static str = "ERROR: No file system mounted, try running newfs then mount";
+
     pub fn with_fs<F>(&self, f: F)
-        where F: FnOnce(&FileSystem) -> ()
+    where F: FnOnce(&FileSystem) -> ()
     {
         match *self.current_fs.borrow() {
             Some(ref fs) => f(fs),
-            None => eprintln!("ERROR: No file system mounted, try running newfs then mount")
+            None => eprintln!("{}", Env::NO_MOUNT_MSG)
+        }
+    }
+
+    pub fn take_fs<F>(&self, f: F)
+    where F: FnOnce(FileSystem) -> ()
+    {
+        let cur_fs = self.current_fs.replace(None);
+        match cur_fs {
+            Some(fs) => f(fs),
+            None => eprintln!("{}", Env::NO_MOUNT_MSG)
         }
     }
 }
@@ -66,7 +78,7 @@ pub fn new_fs(_env: &Env, args: Args) {
         let block_count = parsed.at(1).nat();
         let block_size = parsed.optional(2).nat().map(|n| n as u16);
         match BlockDevice::create(&file_name, block_count, block_size) {
-            Ok(mut device) => {
+            Ok(device) => {
                 if device.config.block_size < 128 {
                     eprintln!(
                         "ERROR: The block size must be at least 128 you gave: {}",
@@ -74,8 +86,8 @@ pub fn new_fs(_env: &Env, args: Args) {
                     );
                     return
                 }
-                let newfs = FileSystem::new(&device);
-                newfs.write(&mut device).unwrap_or_else(|err| {
+                let newfs = FileSystem::new(device);
+                newfs.close().unwrap_or_else(|err| {
                     eprintln!("ERROR: Could not initialize file system: {}", err);
                 });
             }
@@ -98,10 +110,12 @@ pub fn mount(env: &Env, args: Args) {
         match BlockDevice::open(&file_name) {
             Ok(device) => {
                 match FileSystem::read(device) {
-                    Ok(fs) => {
-                        // fs.write_sync_status(&mut device, true);
+                    Ok(Mount { clean_mount, file_system }) => {
+                        if ! clean_mount {
+                            eprintln!("WARNING: The filesystem was not properly unmounted")
+                        }
                         let mut cur_fs = env.current_fs.borrow_mut();
-                        *cur_fs = Some(fs);
+                        *cur_fs = Some(file_system);
                     }
                     Err(err) => {
                         eprintln!("ERROR: Could not sync filesystem because {}", err)
@@ -152,8 +166,12 @@ pub fn free_inode(_env: &Env, args: Args) {
 
 }
 
-pub fn unmount(_env: &Env, _args: Args) {
-    eprintln!("unimplemented");
+pub fn unmount(env: &Env, _args: Args) {
+    env.take_fs(|fs| {
+        fs.close().unwrap_or_else(|err| {
+            eprintln!("ERROR: File system was not unmounted cleanly because: {}", err)
+        })
+    })
 }
 
 

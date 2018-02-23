@@ -4,6 +4,8 @@ An assortment of rust for Reed CS 393
 A simple shell
 ### Compilation
 Install [rust](https://www.rust-lang.org/en-US/install.html).
+**This project requires at least rustc stable 1.2.4**
+You can update your compiler version with `rustup update`.
 ```bash
 git clone https://github.com/mckeankylej/beach
 cd beach/beach
@@ -26,7 +28,7 @@ cd beach/umbrella
 cargo test
 ```
 This being said if you want the command line interface follow the compilation
-instructions for *Beach*
+instructions for **Beach**.
 ### Feature List
 - newfs
 - mount
