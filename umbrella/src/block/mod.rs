@@ -59,24 +59,17 @@ impl MasterBlock {
 // did this because bitvecs have much lower constants on all the operations in question.
 pub struct BlockMap {
     vec:  BitVec,
-    free: Option<BlockNumber>
 }
 
 impl BlockMap {
     pub fn new(block_count: u64) -> BlockMap {
         BlockMap {
-            vec: BitVec::from_elem(block_count as usize, false),
-            free: Some(BlockNumber::new(0))
+            vec: BitVec::from_elem(block_count as usize, false)
         }
     }
 
     fn find_free(vec: &BitVec) -> Option<usize> {
         vec.iter().enumerate().find(|&(_, b)| b == false).map(|(i, _)| i)
-    }
-
-    pub fn init(vec: BitVec) -> BlockMap {
-        let free = BlockMap::find_free(&vec);
-        BlockMap { vec, free: free.map(|i| BlockNumber::new(i as u64)) }
     }
 
     pub fn alloc(&mut self) -> Option<BlockNumber> {
@@ -270,7 +263,7 @@ pub struct Mount {
 
 impl FileSystem {
     pub fn new(device: BlockDevice) -> FileSystem {
-        const INODE_COUNT : u16 = 8;
+        const INODE_COUNT : u16 = 100;
         let block_size = device.config.block_size;
         let block_count = device.config.block_count;
         let mut block_map = BlockMap::new(block_count);
@@ -326,7 +319,7 @@ impl FileSystem {
             bit_vec.extend(BitVec::from_bytes(&bm_vec));
         }
         bit_vec.truncate(master_block.block_count as usize);
-        let block_map = BlockMap::init(bit_vec);
+        let block_map = BlockMap { vec: bit_vec };
         assert!(block_number <= master_block.inode_map);
         let mut nodes = vec![];
         let mut block_number = master_block.inode_map;

@@ -87,6 +87,13 @@ pub fn new_fs(_env: &Env, args: Args) {
                     );
                     return
                 }
+                if device.config.block_count < 128 {
+                    eprintln!(
+                        "ERROR: The block count must be at least 128 you gave: {}",
+                        device.config.block_count
+                    );
+                    return
+                }
                 let newfs = FileSystem::new(device);
                 newfs.close().unwrap_or_else(|err| {
                     eprintln!("ERROR: Could not initialize file system: {}", err);
