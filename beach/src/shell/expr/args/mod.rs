@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::env::current_dir;
@@ -102,7 +103,7 @@ pub fn mount(env: &Env, args: Args) {
         let file_name = parsed.at(0).string();
         if ! Path::new(&file_name).exists() {
             eprintln!(
-                "ERROR: The device: {0} does not exist. Try running 'newfs {0} 128' first.",
+                "ERROR: The device {0} does not exist. Try running 'newfs {0} 128' first.",
                 file_name
             );
             return
@@ -129,7 +130,8 @@ pub fn mount(env: &Env, args: Args) {
 
 pub fn block_map(env: &Env, _args: Args) {
     env.with_fs(|fs| {
-        print!("{}", fs.block_map)
+        print!("{}", fs.block_map);
+        io::stdout().flush().unwrap()
     })
 }
 

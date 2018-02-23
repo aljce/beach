@@ -33,3 +33,4 @@ instructions for **Beach**.
 - newfs
 - mount
 - blockmap
+- unmount
