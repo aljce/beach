@@ -1,8 +1,8 @@
 # Beach & Umbrella
 An assortment of rust for Reed CS 393
 ## Beach 
-A simple shell written in rust
-### Installation
+A simple shell
+### Compilation
 Install [rust](https://www.rust-lang.org/en-US/install.html).
 ```bash
 git clone https://github.com/mckeankylej/beach
@@ -18,9 +18,15 @@ cargo run
 - Tab completion of files
 - History completion (up/down keys)
 ## Umbrella
-Umbrella is a library that has functions and types related to file system operations.
-Beach is merely a frontend to umbrella. This being said the command line interface can
-be accessed by `cd beach/beach && cargo run`.
+A simple file system
+### Compilation
+```bash
+git clone https://github.com/mckeankylej/beach
+cd beach/umbrella
+cargo test
+```
+This being said if you want the command line interface follow the compilation
+instructions for *Beach*
 ### Feature List
 - newfs
 - mount
