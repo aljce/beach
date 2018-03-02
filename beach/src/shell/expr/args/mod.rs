@@ -7,6 +7,7 @@ use umbrella::block::device::{BlockNumber, BlockDevice};
 use umbrella::block::{INodeFlags, FileSystem, Mount};
 
 pub mod parse;
+pub mod parse2;
 pub use self::parse::*;
 
 /// The mutable state that backs a shell (environment variables, current directory, ...)
