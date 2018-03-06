@@ -1,5 +1,7 @@
 use std::str::FromStr;
-use std::marker::PhantomData;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::borrow::Borrow;
 
 use frunk::hlist::*;
 use frunk::coproduct::*;
@@ -18,6 +20,22 @@ impl<E> Err<E> {
             Err::MissingArgument => Err::MissingArgument,
             Err::Other(err) => Err::Other(f(err))
         }
+    }
+}
+
+impl<E: Display> Display for Err<E> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        panic!()
+    }
+}
+
+impl<E: Error> Error for Err<E> {
+    fn description(&self) -> &str {
+        panic!()
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        panic!()
     }
 }
 
@@ -54,42 +72,30 @@ impl<'a> Args<'a> {
     }
 }
 
-pub trait ParseArg {
-    type Arg;
+pub trait ParseArg: Sized {
     type Err;
-    fn parse_arg(args: &mut Args) -> Result<Self::Arg, Err<Self::Err>>;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>>;
 }
 
-pub enum Nat {}
-
-impl ParseArg for Nat {
-    type Arg = u8;
+impl ParseArg for u8 {
     type Err = <u8 as FromStr>::Err;
-    fn parse_arg(args: &mut Args) -> Result<Self::Arg, Err<Self::Err>> {
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
         let arg = args.pop()?;
         let res = u8::from_str(arg)?;
         Ok(res)
     }
 }
 
-pub enum Text {}
-
-impl ParseArg for Text {
-    type Arg = String;
+impl ParseArg for String {
     type Err = Void;
-    fn parse_arg(args: &mut Args) -> Result<Self::Arg, Err<Self::Err>> {
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
         args.pop().map(String::from)
     }
 }
 
-pub struct Optional<A> {
-    _phantom: PhantomData<A>
-}
-
-impl<A: ParseArg> ParseArg for Optional<A> {
-    type Arg = Option<A::Arg>;
+impl<A: ParseArg> ParseArg for Option<A> {
     type Err = A::Err;
-    fn parse_arg(args: &mut Args) -> Result<Self::Arg, Err<Self::Err>> {
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
         let old_ptr = args.ptr;
         let res = match A::parse_arg(args) {
             Err(_) => {
@@ -102,27 +108,84 @@ impl<A: ParseArg> ParseArg for Optional<A> {
     }
 }
 
+#[derive(Debug)]
+pub struct RealizedError {
+    description: String,
+    cause: Option<Box<Error>>
+}
+
+impl RealizedError {
+    pub fn new<E: Error>(err: E) -> RealizedError {
+        RealizedError {
+            description: err.description().to_string(),
+            cause: err.cause().map(???) // What goes inside the map?
+        }
+    }
+}
+
+impl Display for RealizedError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        writeln!(f, "{}", self.description)
+    }
+}
+
+impl Error for RealizedError {
+    fn description(&self) -> &str {
+        self.description.as_ref()
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        // self.cause.map(|c| c.as_ref())
+        None
+    }
+}
+
+pub trait CoproductError: Sized {
+    // fn coproduct_error(self) -> RealizedError;
+}
+
+// impl CoproductError for CNil {
+//     fn coproduct_error(self) -> RealizedError {
+//         match self { }
+//     }
+// }
+
+// impl<H: Error, T: CoproductError> CoproductError for Coproduct<H, T> {
+//     fn coproduct_error(self) -> RealizedError {
+//         match self {
+//             Coproduct::Inl(err)  => RealizedError::new(err),
+//             Coproduct::Inr(next) => next.coproduct_error()
+//         }
+//     }
+// }
 
 pub trait Parse: HList {
-    type List;
     type Err;
-    fn parse(args: Args) -> Result<Self::List, Err<Self::Err>>;
+    fn parse(args: Args) -> Result<Self, Err<Self::Err>>;
+    fn parse_explain<F>(args: Args, f: F)
+    where F: FnOnce(Self) -> (),
+          Self::Err: CoproductError
+    {
+        match Self::parse(args) {
+            Ok(parsed) => f(parsed),
+            // Err(err) => eprintln!("{}", err.map(|c| c.coproduct_error()).description())
+            Err(_) => panic!()
+        }
+    }
 }
 
 impl Parse for HNil {
-    type List = HNil;
-    type Err  = CNil;
-    fn parse(_: Args) -> Result<Self::List, Err<Self::Err>> {
+    type Err = CNil;
+    fn parse(_: Args) -> Result<Self, Err<Self::Err>> {
         Ok(HNil)
     }
 }
 
 impl<H: ParseArg, T: Parse> Parse for HCons<H, T> {
-    type List = HCons<H::Arg, T::List>;
     type Err  = Coproduct<H::Err, T::Err>;
-    fn parse(mut args: Args) -> Result<Self::List, Err<Self::Err>> {
+    fn parse(mut args: Args) -> Result<Self, Err<Self::Err>> {
         let head = H::parse_arg(&mut args).map_err(|e| e.map(Coproduct::Inl))?;
-        let tail = T::parse(args).map_err(|err| err.map(Coproduct::Inr))?;
+        let tail = T::parse(args).map_err(|e| e.map(Coproduct::Inr))?;
         Ok(HCons { head, tail })
     }
 }
@@ -142,7 +205,7 @@ mod tests {
         let vec = vec!["foobar", "2", "not-a-number"];
         let args = Args::new(&vec);
         assert_eq!(
-            <Hlist![Text, Nat, Optional<Nat>, Text]>::parse(args),
+            <Hlist![String, u8, Option<u8>, String]>::parse(args),
             Ok(hlist!["foobar".to_string(), 2, None, "not-a-number".to_string()])
         );
     }
