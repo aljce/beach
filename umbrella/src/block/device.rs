@@ -76,9 +76,9 @@ pub struct DeviceConfig {
 }
 
 impl DeviceConfig {
-    pub fn new(s: &str) -> DeviceConfig  {
+    pub fn new(path: &str) -> DeviceConfig  {
         DeviceConfig {
-            path:        PathBuf::from(s),
+            path:        PathBuf::from(path),
             block_size:  0,
             block_count: 0
         }

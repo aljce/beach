@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::env::current_dir;
 
 use umbrella::block::device::{BlockNumber, BlockDevice};
@@ -51,9 +51,8 @@ impl Env {
 }
 
 pub fn cd(env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::string()]);
-    args.parse_explain("cd", parser, |parsed| {
-        let path = PathBuf::from(parsed.at(0).string());
+    type Parser = Hlist![PathBuf];
+    Parser::parse_explain("cd", args, |hlist_pat![path]| {
         if path.is_dir() {
             let mut buf = env.current_dir.borrow_mut();
             if path.is_absolute() {
@@ -68,16 +67,8 @@ pub fn cd(env: &Env, args: Args) {
 }
 
 pub fn new_fs(_env: &Env, args: Args) {
-    let parser = Parser::new(
-        vec![ Argument::string()
-            , Argument::nat()
-            , Argument::Optional(Kind::Nat)
-        ]
-    );
-    args.parse_explain("newfs", parser, |parsed| {
-        let file_name = parsed.at(0).string();
-        let block_count = parsed.at(1).nat();
-        let block_size = parsed.optional(2).nat().map(|n| n as u16);
+    type Parser = Hlist![String, u64, Option<u16>];
+    Parser::parse_explain("newfs", args, |hlist_pat![file_name, block_count, block_size]| {
         match BlockDevice::create(&file_name, block_count, block_size) {
             Ok(device) => {
                 if device.config.block_size < 128 {
@@ -105,17 +96,16 @@ pub fn new_fs(_env: &Env, args: Args) {
 }
 
 pub fn mount(env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::string()]);
-    args.parse_explain("mount", parser, |parsed| {
-        let file_name = parsed.at(0).string();
-        if ! Path::new(&file_name).exists() {
+    type Parser = Hlist![PathBuf];
+    Parser::parse_explain("mount", args, |hlist_pat![file_name]| {
+        if ! file_name.exists() {
             eprintln!(
-                "ERROR: The device {0} does not exist. Try running 'newfs {0} 128' first.",
+                "ERROR: The device {0:?} does not exist. Try running 'newfs {0:?} 128' first.",
                 file_name
             );
             return
         }
-        match BlockDevice::open(&file_name) {
+        match BlockDevice::open(file_name.to_string_lossy().as_ref()) {
             Ok(device) => {
                 match FileSystem::read(device) {
                     Ok(Mount { clean_mount, file_system }) => {
@@ -152,9 +142,8 @@ pub fn alloc_block(env: &Env, _args: Args) {
 }
 
 pub fn free_block(env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::nat()]);
-    args.parse_explain("free_block", parser, |parsed| {
-        let block_number = BlockNumber::new(parsed.at(0).nat());
+    type Parser = Hlist![BlockNumber];
+    Parser::parse_explain("free_block", args, |hlist_pat![block_number]| {
         env.with_fs(|fs| {
             fs.block_map.free(block_number)
         })
@@ -169,41 +158,28 @@ pub fn inode_map(env: &Env, _args: Args) {
 }
 
 pub fn alloc_inode(env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::string()]);
-    args.parse_explain("alloc_inode", parser, |parsed| {
-        let inode_type = parsed.at(0).string();
-        match INodeFlags::parse(&inode_type) {
-            Ok(flags) => {
-                env.with_fs(|fs| {
-                    match fs.inode_map.alloc(flags) {
-                        Some(block_number) => {
-                            println!("alloc [{}]", block_number)
-                        }
-                        None => {
-                            eprintln!("ERROR: No room left on device")
-                        }
-                    }
-                })
+    type Parser = Hlist![INodeFlags];
+    Parser::parse_explain("alloc_inode", args, |hlist_pat![flags]| {
+        env.with_fs(|fs| {
+            match fs.inode_map.alloc(flags) {
+                Some(block_number) => {
+                    println!("alloc [{}]", block_number)
+                }
+                None => {
+                    eprintln!("ERROR: No room left on device")
+                }
             }
-            Err(_)    => {
-                eprintln!(
-                    "ERROR: Could not parse inode type [{}] please choose from [0fdsbD]",
-                    inode_type
-                )
-            }
-        }
+        })
     })
 }
 
 pub fn free_inode(env: &Env, args: Args) {
-    let parser = Parser::new(vec![Argument::nat()]);
-    args.parse_explain("free_inode", parser, |parsed| {
-        let block_number = BlockNumber::new(parsed.at(0).nat());
+    type Parser = Hlist![BlockNumber];
+    Parser::parse_explain("free_inode", args, |hlist_pat![block_number]| {
         env.with_fs(|fs| {
             fs.inode_map.free(block_number)
         })
     })
-
 }
 
 pub fn unmount(env: &Env, _args: Args) {

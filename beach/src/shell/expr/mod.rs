@@ -2,7 +2,6 @@ use std::str;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::ffi::OsStr;
-use itertools::Itertools;
 use nom::{space, multispace, Err, ErrorKind};
 
 pub mod args;
@@ -66,8 +65,7 @@ pub struct Process<'a> {
 
 impl<'a> Display for Process<'a> {
     fn fmt(&self, format: &mut Formatter) -> fmt::Result {
-        let rest = self.args.vec.iter().join(" ");
-        write!(format, "{} {}", self.name, rest)
+        write!(format, "{} {}", self.name, self.args)
     }
 }
 
@@ -190,9 +188,7 @@ named!(
     args<Args>,
     map!(
         opt!(strict_args),
-        |res| Args {
-            vec: res.unwrap_or(vec![])
-        }
+        |res| Args::new(res.unwrap_or(vec![]))
     )
 );
 
@@ -294,29 +290,23 @@ mod tests {
         parses_to(super::esc("foo\\ bar ".as_bytes()), "foo bar".to_string());
     }
 
-    fn empty_args() -> Args {
-        Args { vec: vec![] }
-    }
-
     #[test]
     fn command() {
         let cd = Expr::Base (
             Process {
                 name: Program::Cd,
-                args: empty_args()
+                args: Args::empty()
             }
         );
         total_to("cd", cd);
         let ping = Expr::Base(
             Process {
                 name: Program::Other("ping"),
-                args: empty_args()
+                args: Args::empty()
             }
         );
         total_to("ping", ping);
-        let args = Args {
-            vec: vec!["-t".to_string(), "5".to_string()]
-        };
+        let args = Args::new(vec!["-t".to_string(), "5".to_string()]);
         let ping_args = Expr::Base(
             Process { name: Program::Other("ping"), args }
         );
@@ -325,16 +315,17 @@ mod tests {
 
     #[test]
     fn total() {
-        let args = Args {
-            vec: vec![ "-t".to_string()
-                     , "f".to_string()
-                     , "--name".to_string()
-                     , "result".to_string() ]
-        };
+        let args = Args::new(
+            vec![ "-t".to_string()
+                , "f".to_string()
+                , "--name".to_string()
+                , "result".to_string()
+            ]
+        );
         let find = Process { name: Program::Other("find"), args };
         let cat = Process {
             name: Program::Other("cat"),
-            args: empty_args()
+            args: Args::empty()
         };
         let comm = Expr::Sequence {
             left: find,
