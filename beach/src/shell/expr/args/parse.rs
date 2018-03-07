@@ -1,190 +1,256 @@
 use std::str::FromStr;
 use std::num::ParseIntError;
+use std::string::ParseError;
+use std::path::PathBuf;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 
-// TODO: This whole module is a huge hack. This should be implemented like optparse-applicative
-// or with hlists
+use itertools::Itertools;
+use frunk::hlist::*;
+use frunk::coproduct::*;
+use void::Void;
+use umbrella::block::device::BlockNumber;
+use umbrella::block::INodeFlags;
 
-#[derive(Clone, PartialEq)]
-pub enum Kind {
-    Nat,
-    String
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub enum Err<E> {
+    MissingArgument,
+    Other(E)
 }
 
-impl Kind {
-    fn parse(&self, s: String) -> Result<Type, Err> {
+impl<E> Err<E> {
+    pub fn map<F, O>(self, f: F) -> Err<O>
+    where F : FnOnce(E) -> O {
+        match self {
+            Err::MissingArgument => Err::MissingArgument,
+            Err::Other(err) => Err::Other(f(err))
+        }
+    }
+}
+
+impl<E: Display> Display for Err<E> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         match *self {
-            Kind::Nat => {
-                let res = Type::Nat(u64::from_str(&s).map_err(|int_err| {
-                    Err::Nat { int_err, failed: s }
-                })?);
-                Ok(res)
-            }
-            Kind::String => Ok(Type::String(s))
+            Err::MissingArgument => writeln!(f, "Error: missing argument"),
+            Err::Other(ref err)  => writeln!(f, "Error: {}", err)
         }
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub enum Type {
-    Nat(u64),
-    String(String)
-}
-
-impl Type {
-    pub fn nat(&self) -> u64 {
+impl<E: Error> Error for Err<E> {
+    fn description(&self) -> &str {
         match *self {
-            Type::Nat(n) => n,
-            _ => panic!("argument is not a nat")
+            Err::MissingArgument => "missing argument",
+            Err::Other(ref err) => err.description()
         }
     }
 
-    pub fn string(&self) -> String {
+    fn cause(&self) -> Option<&Error> {
         match *self {
-            Type::String(ref s) => s.clone(),
-            _ => panic!("argument is not a string")
+            Err::MissingArgument => None,
+            Err::Other(ref err) => err.cause()
         }
     }
 }
 
-
-
-#[derive(Clone, PartialEq)]
-pub enum Argument {
-    Required(Kind),
-    Optional(Kind)
-}
-
-impl Argument {
-    pub fn nat() -> Argument {
-        Argument::Required(Kind::Nat)
-    }
-
-    pub fn string() -> Argument {
-        Argument::Required(Kind::String)
+impl<E> From<E> for Err<E> {
+    fn from(err: E) -> Err<E> {
+        Err::Other(err)
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub enum Err {
-    Nat {
-        int_err: ParseIntError,
-        failed:  String
-    },
-    MissingArguments,
-}
-
-impl Err {
-    pub fn render(&self, prog: &str) -> String {
-        match *self {
-            Err::Nat { ref failed, .. } => {
-                format!("ERROR: {} needs to be a nonnegative integer", failed)
-            }
-            Err::MissingArguments => {
-                format!("ERROR: {} needs more arguments", prog)
-            }
-        }
-    }
-
-    pub fn explain(&self, prog: &str) {
-        eprintln!("{}", self.render(prog))
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub struct Optional {
-    option: Option<Type>
-}
-
-impl Optional {
-    pub fn nat(self) -> Option<u64> {
-        self.option.map(|t| t.nat())
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub enum ParsedArgument {
-    Required(Type),
-    Optional(Optional)
-}
-
-#[derive(Clone, PartialEq)]
-pub struct Parsed {
-    types: Vec<ParsedArgument>
-}
-
-impl Parsed {
-    pub fn at(&self, i: usize) -> Type {
-        match self.types[i].clone() {
-            ParsedArgument::Required(t) => t,
-            _ => panic!("optional argument required")
-        }
-    }
-
-    pub fn optional(&self, i: usize) -> Optional {
-        match self.types[i].clone() {
-            ParsedArgument::Optional(t) => t,
-            _ => panic!("required argument optional")
-        }
-    }
-}
-
-pub struct Parser {
-    kinds: Vec<Argument>
-}
-
-impl Parser {
-    pub fn new(kinds: Vec<Argument>) -> Parser {
-        Parser { kinds }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Args {
+    ptr: usize,
     pub vec: Vec<String>
 }
 
 impl Args {
-    pub fn parse(&self, parser: Parser) -> Result<Parsed, Err> {
-        let mut types : Vec<ParsedArgument> = vec![];
-        let len = self.vec.len();
-        let mut i = 0;
-        for kind in parser.kinds.iter() {
-            match *kind {
-                Argument::Required(ref kind) => {
-                    if len <= i {
-                        return Err(Err::MissingArguments)
-                    }
-                    let arg = self.vec[i].clone();
-                    i += 1;
-                    let t = kind.parse(arg)?;
-                    types.push(ParsedArgument::Required(t));
-                }
-                Argument::Optional(ref kind) => {
-                    if len <= i {
-                        let none = Optional { option: None };
-                        types.push(ParsedArgument::Optional(none));
-                        continue
-                    }
-                    let arg = self.vec[i].clone();
-                    let opt = match kind.parse(arg) {
-                        Ok(t) => {
-                            i += 1;
-                            Optional { option: Some(t) }
-                        }
-                        Err(_) => Optional { option: None }
-                    };
-                    types.push(ParsedArgument::Optional(opt))
-                }
-            }
-        }
-        Ok(Parsed { types })
+    pub fn new(args: Vec<String>) -> Args {
+        Args { ptr: 0, vec: args }
     }
 
-    pub fn parse_explain<F>(&self, prog: &str, parser: Parser, with_parsed: F)
-    where F: FnOnce(Parsed) -> () {
-        match self.parse(parser) {
-            Ok(parsed) => with_parsed(parsed),
-            Err(err) => err.explain(prog)
+    #[cfg(test)]
+    pub fn empty() -> Args {
+        Args::new(vec![])
+    }
+
+    pub fn pop<E>(&mut self) -> Result<String, Err<E>> {
+        if self.ptr < self.vec.len() {
+            let res = Ok(self.vec[self.ptr].clone());
+            self.ptr += 1;
+            res
+        } else {
+            Err(Err::MissingArgument)
         }
+    }
+}
+
+impl Display for Args {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.vec.iter().join(" "))
+    }
+}
+
+pub trait ParseArg: Sized {
+    type Err;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>>;
+}
+
+macro_rules! parse_arg {
+    ($t:ty) => {
+        impl ParseArg for $t {
+            type Err = <$t as FromStr>::Err;
+            fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
+                let arg = args.pop()?;
+                Ok(<$t>::from_str(&arg)?)
+            }
+        }
+    };
+}
+
+parse_arg!(u8);
+parse_arg!(u16);
+parse_arg!(u32);
+parse_arg!(u64);
+parse_arg!(String);
+
+impl ParseArg for BlockNumber {
+    type Err = <u64 as ParseArg>::Err;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
+        u64::parse_arg(args).map(BlockNumber::new)
+    }
+}
+
+pub struct ParseINodeFlagsError;
+
+impl ParseArg for INodeFlags {
+    type Err = ParseINodeFlagsError;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
+        let arg = args.pop()?;
+        INodeFlags::parse(&arg).map_err(|_| Err::Other(ParseINodeFlagsError))
+            // Err(_)    => {
+            //     eprintln!(
+            //         "ERROR: Could not parse inode type [{}] please choose from [0fdsbD]",
+            //         inode_type
+            //     )
+            // }
+    }
+}
+
+impl ParseArg for PathBuf {
+    type Err = Void;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
+        args.pop().map(PathBuf::from)
+    }
+}
+
+impl<A: ParseArg> ParseArg for Option<A> {
+    type Err = A::Err;
+    fn parse_arg(args: &mut Args) -> Result<Self, Err<Self::Err>> {
+        let old_ptr = args.ptr;
+        let res = match A::parse_arg(args) {
+            Err(_) => {
+                args.ptr = old_ptr;
+                None
+            }
+            Ok(arg) => Some(arg)
+        };
+        Ok(res)
+    }
+}
+
+pub trait Explain {
+    fn explain(&self, prog: &str) -> String;
+}
+
+impl Explain for Void {
+    fn explain(&self, _: &str) -> String {
+        match *self { }
+    }
+}
+
+impl Explain for ParseError {
+    fn explain(&self, _: &str) -> String {
+        match *self { }
+    }
+}
+
+impl Explain for ParseIntError {
+    fn explain(&self, prog: &str) -> String {
+        format!("{} requires a non-negative integer which failed to parse because: {}", prog, self)
+    }
+}
+
+impl Explain for ParseINodeFlagsError {
+    fn explain(&self, prog: &str) -> String {
+        format!(
+            "{} requires a valid inode type please choose from [0fdsbD]",
+            prog
+        )
+    }
+}
+
+impl Explain for CNil {
+    fn explain(&self, _: &str) -> String {
+        match *self { }
+    }
+}
+
+impl<H: Explain, T: Explain> Explain for Coproduct<H, T> {
+    fn explain(&self, prog: &str) -> String {
+        match *self {
+            Coproduct::Inl(ref err)  => err.explain(prog),
+            Coproduct::Inr(ref rest) => rest.explain(prog)
+        }
+    }
+}
+
+pub trait Parse: HList {
+    type Err;
+    fn parse(args: Args) -> Result<Self, Err<Self::Err>>;
+    fn parse_explain<F>(prog: &str, args: Args, f: F)
+    where F: FnOnce(Self) -> (),
+          Self::Err: Explain
+    {
+        match Self::parse(args) {
+            Ok(parsed) => f(parsed),
+            Err(err) => eprintln!("{}", err.map(|c| c.explain(prog)))
+        }
+    }
+}
+
+impl Parse for HNil {
+    type Err = CNil;
+    fn parse(_: Args) -> Result<Self, Err<Self::Err>> {
+        Ok(HNil)
+    }
+}
+
+impl<H: ParseArg, T: Parse> Parse for HCons<H, T> {
+    type Err  = Coproduct<H::Err, T::Err>;
+    fn parse(mut args: Args) -> Result<Self, Err<Self::Err>> {
+        let head = H::parse_arg(&mut args).map_err(|e| e.map(Coproduct::Inl))?;
+        let tail = T::parse(args).map_err(|e| e.map(Coproduct::Inr))?;
+        Ok(HCons { head, tail })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn parse_none() {
+        assert_eq!(<Hlist![]>::parse(Args::empty()), Ok(hlist![]));
+    }
+
+    #[test]
+    fn parse_many() {
+        let vec = vec!["foobar".to_string(), "2".to_string(), "not-a-number".to_string()];
+        let args = Args::new(vec);
+        assert_eq!(
+            <Hlist![String, u8, Option<u8>, String]>::parse(args),
+            Ok(hlist!["foobar".to_string(), 2, None, "not-a-number".to_string()])
+        );
     }
 }
