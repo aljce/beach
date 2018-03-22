@@ -3,7 +3,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::env::current_dir;
 
-use umbrella::device::{BlockNumber, BlockDevice};
+use umbrella::BlockNumber;
+use umbrella::device::BlockDevice;
 use umbrella::fs::{INodeFlags, FileSystem, Mount};
 
 use args::{Args, Parse};

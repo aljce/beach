@@ -9,7 +9,7 @@ use itertools::Itertools;
 use frunk::hlist::*;
 use frunk::coproduct::*;
 use void::Void;
-use umbrella::device::BlockNumber;
+use umbrella::BlockNumber;
 use umbrella::fs::INodeFlags;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]

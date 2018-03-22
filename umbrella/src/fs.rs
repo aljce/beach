@@ -3,7 +3,8 @@ use std::time::{SystemTime};
 use bit_vec::BitVec;
 use bincode::{serialize_into, deserialize_from};
 
-use device::{self, BlockNumber, BlockDevice, MASTER_BLOCK_NUMBER};
+use block_number::{BlockNumber, MASTER_BLOCK_NUMBER, Sequence};
+use device::{self, BlockDevice};
 
 bitflags! {
     #[derive(Serialize, Deserialize)]
@@ -34,8 +35,8 @@ impl MasterBlock {
         }
     }
 
-    pub fn block_map_blocks(&self) -> usize {
-        ((self.block_count / self.block_size as u64) / 8) as usize
+    pub fn block_map_blocks(&self) -> u64 {
+        (self.block_count / self.block_size as u64) / 8
     }
 
     pub fn write(&self, device: &mut BlockDevice) -> device::Result<()> {
@@ -67,19 +68,24 @@ impl BlockMap {
         }
     }
 
+    pub fn set(&mut self, block_number: BlockNumber, b: bool) {
+        self.vec.set(block_number.index(), b)
+    }
+
     fn find_free(vec: &BitVec) -> Option<usize> {
         vec.iter().enumerate().find(|&(_, b)| b == false).map(|(i, _)| i)
     }
 
     pub fn alloc(&mut self) -> Option<BlockNumber> {
         BlockMap::find_free(&self.vec).map(|i| {
-            self.vec.set(i, true);
-            BlockNumber::new(i as u64)
+            let block_number = BlockNumber::new(i as u64);
+            self.set(block_number, true);
+            block_number
         })
     }
 
     pub fn free(&mut self, block_number: BlockNumber) {
-        self.vec.set(block_number.index(), false)
+        self.set(block_number, false)
     }
 }
 
@@ -262,13 +268,14 @@ pub struct Mount {
 
 impl FileSystem {
     pub fn new(device: BlockDevice) -> FileSystem {
-        const INODE_COUNT : u16 = 100;
+        const INODE_COUNT : u16 = 10;
         let block_size = device.config.block_size;
         let block_count = device.config.block_count;
         let mut block_map = BlockMap::new(block_count);
         let master_block = MasterBlock::new(block_size, block_count, INODE_COUNT);
-        for i in 0 .. 2 + master_block.block_map_blocks() + INODE_COUNT as usize {
-            block_map.vec.set(i, true);
+        let claimed_blocks = master_block.block_map_blocks() + INODE_COUNT as u64;
+        for i in Sequence::new(MASTER_BLOCK_NUMBER, claimed_blocks) {
+            block_map.set(i, true);
         }
         let inode_map = INodeMap::new(INODE_COUNT);
         FileSystem { master_block, block_map, inode_map, device }
@@ -311,7 +318,7 @@ impl FileSystem {
         let mut master_block : MasterBlock = deserialize_from(&mb_vec[..])?;
         let mut bit_vec = BitVec::new();
         let mut block_number = master_block.block_map;
-        for _ in 0 .. 1 + master_block.block_map_blocks() {
+        for _ in 1 .. master_block.block_map_blocks() {
             let mut bm_vec = vec![0; master_block.block_size as usize];
             device.read(block_number, &mut bm_vec)?;
             block_number.next();

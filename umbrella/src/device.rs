@@ -7,6 +7,8 @@ use std::fs::{File, OpenOptions};
 use nom::{Err, digit};
 use bincode;
 
+use block_number::{BlockNumber};
+
 pub enum Error {
     Parse(Err),
     Bincode(Box<bincode::ErrorKind>),
@@ -104,39 +106,6 @@ impl DeviceConfig {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct BlockNumber {
-    number: u64
-}
-
-impl BlockNumber {
-    pub fn new(number: u64) -> BlockNumber {
-        BlockNumber { number }
-    }
-
-    pub fn next(&mut self) {
-        self.number += 1;
-    }
-
-    pub fn index(&self) -> usize {
-        self.number as usize
-    }
-}
-
-impl Debug for BlockNumber {
-    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
-        write!(f, "{}", self)
-    }
-}
-
-impl Display for BlockNumber {
-    fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
-        write!(f, "{}", self.number)
-    }
-}
-
-pub const MASTER_BLOCK_NUMBER : BlockNumber = BlockNumber { number: 1 };
-
 pub struct BlockDevice {
     pub config: DeviceConfig,
         handle: File
@@ -192,7 +161,7 @@ impl BlockDevice {
         let block_count = self.config.block_count;
         if block_count <= block_num.number {
             let err_msg = format!(
-                "create: block_count [{}] is greater than the requested block number [{}]",
+                "create: block_count [{}] is less than the requested block number [{}]",
                 block_count,
                 block_num
             );
