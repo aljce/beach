@@ -9,8 +9,8 @@ use itertools::Itertools;
 use frunk::hlist::*;
 use frunk::coproduct::*;
 use void::Void;
-use umbrella::block::device::BlockNumber;
-use umbrella::block::INodeFlags;
+use umbrella::device::BlockNumber;
+use umbrella::fs::INodeFlags;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Err<E> {

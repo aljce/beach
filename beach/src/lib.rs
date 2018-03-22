@@ -15,8 +15,13 @@ use rustyline::{Cmd, Config, CompletionType, Editor, EditMode, KeyPress};
 use rustyline::completion::FilenameCompleter;
 use rustyline::error::ReadlineError;
 
-mod shell;
-use shell::{Env, ProcessErr};
+pub mod builtins;
+use builtins::{Env};
+
+pub mod args;
+
+mod expr;
+use expr::ProcessErr;
 
 pub fn repl() {
     let prompt = "> "; // TODO: Config?
@@ -43,14 +48,14 @@ pub fn repl() {
         match readline {
             Ok(ref line) if line.is_empty() => {}
             Ok(ref line) => {
-                match shell::parse(&line) {
+                match expr::parse(&line) {
                     Err(err) => {
                         let no_newlines = line.chars().filter(|c| *c != '\n').collect::<String>();
                         eprintln!("ERROR: could not parse ({}) because {}", no_newlines, err)
                     },
                     Ok(e) => {
                         rl.add_history_entry(line.as_ref());
-                        if let Err(process_err) = shell::exec(&env, e) {
+                        if let Err(process_err) = expr::exec(&env, e) {
                             match process_err {
                                 ProcessErr::Continue => {},
                                 ProcessErr::Exit => break,

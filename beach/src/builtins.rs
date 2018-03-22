@@ -3,11 +3,10 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::env::current_dir;
 
-use umbrella::block::device::{BlockNumber, BlockDevice};
-use umbrella::block::{INodeFlags, FileSystem, Mount};
+use umbrella::device::{BlockNumber, BlockDevice};
+use umbrella::fs::{INodeFlags, FileSystem, Mount};
 
-pub mod parse;
-pub use self::parse::*;
+use args::{Args, Parse};
 
 /// The mutable state that backs a shell (environment variables, current directory, ...)
 pub struct Env {
