@@ -3,8 +3,8 @@ use std::io;
 use std::process::{Command, Stdio, ExitStatus};
 use std::fs::File;
 
-pub mod expr;
-pub use self::expr::*;
+use builtins::{self, Env};
+use expr::{Expr, Process, Program, Operator};
 
 pub enum ProcessErr {
     Continue,
@@ -23,16 +23,16 @@ type Result<A> = result::Result<A, ProcessErr>;
 
 fn process(env: &Env, c: Process) -> Result<Command> {
     let prog = match c.name {
-        Program::Cd => cd,
-        Program::NewFS => new_fs,
-        Program::Mount => mount,
-        Program::BlockMap => block_map,
-        Program::AllocBlock => alloc_block,
-        Program::FreeBlock => free_block,
-        Program::INodeMap => inode_map,
-        Program::AllocINode => alloc_inode,
-        Program::FreeINode => free_inode,
-        Program::Unmount => unmount,
+        Program::Cd => builtins::cd,
+        Program::NewFS => builtins::new_fs,
+        Program::Mount => builtins::mount,
+        Program::BlockMap => builtins::block_map,
+        Program::AllocBlock => builtins::alloc_block,
+        Program::FreeBlock => builtins::free_block,
+        Program::INodeMap => builtins::inode_map,
+        Program::AllocINode => builtins::alloc_inode,
+        Program::FreeINode => builtins::free_inode,
+        Program::Unmount => builtins::unmount,
         Program::Exit => {
             return Err(ProcessErr::Exit)
         }

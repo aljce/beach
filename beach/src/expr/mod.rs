@@ -4,8 +4,9 @@ use std::fmt::{Display, Formatter};
 use std::ffi::OsStr;
 use nom::{space, multispace, Err, ErrorKind};
 
-pub mod args;
-pub use self::args::*;
+use args::Args;
+mod run;
+pub use self::run::*;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Program<'a> {

@@ -3,8 +3,7 @@ use std::time::{SystemTime};
 use bit_vec::BitVec;
 use bincode::{serialize_into, deserialize_from};
 
-pub mod device;
-use self::device::{BlockNumber, BlockDevice, MASTER_BLOCK_NUMBER};
+use device::{self, BlockNumber, BlockDevice, MASTER_BLOCK_NUMBER};
 
 bitflags! {
     #[derive(Serialize, Deserialize)]
