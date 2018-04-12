@@ -29,14 +29,14 @@ impl MasterBlock {
             block_size,
             block_count,
             inode_count,
-            block_map: BlockNumber::new(2),
-            inode_map: BlockNumber::new(3 + (block_count / block_size as u64) / 8),
+            block_map: BlockNumber::new(1),
+            inode_map: BlockNumber::new(2 + (block_count / block_size as u64) / 8),
             flags:     MasterBlockFlags::SYNCED
         }
     }
 
     pub fn block_map_blocks(&self) -> u64 {
-        (self.block_count / self.block_size as u64) / 8
+        1 + self.block_count / self.block_size as u64 / 8
     }
 
     pub fn write(&self, device: &mut BlockDevice) -> device::Result<()> {
@@ -186,7 +186,7 @@ impl INode {
             flags: INodeFlags::FREE,
             perms: Permissions::UNUSED,
             level: 0,
-            block_ptrs: [BlockNumber::new(1); 12]
+            block_ptrs: [BlockNumber::new(0); 12]
         }
     }
 }
@@ -318,7 +318,7 @@ impl FileSystem {
         let mut master_block : MasterBlock = deserialize_from(&mb_vec[..])?;
         let mut bit_vec = BitVec::new();
         let mut block_number = master_block.block_map;
-        for _ in 1 .. master_block.block_map_blocks() {
+        for _ in 0 .. master_block.block_map_blocks() {
             let mut bm_vec = vec![0; master_block.block_size as usize];
             device.read(block_number, &mut bm_vec)?;
             block_number.next();
