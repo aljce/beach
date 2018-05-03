@@ -3,8 +3,9 @@ use std::time::{SystemTime};
 use bit_vec::BitVec;
 use bincode::{serialize_into, deserialize_from};
 
-use block_number::{BlockNumber, MASTER_BLOCK_NUMBER, Sequence};
-use device::{self, BlockDevice};
+use block_number::{BlockNumber, BlockOffset, MASTER_BLOCK_NUMBER, Sequence};
+use device::{self, BlockDevice, Error};
+use cache::{Cache};
 
 bitflags! {
     #[derive(Serialize, Deserialize)]
@@ -58,7 +59,7 @@ impl MasterBlock {
 // I want to support would be optimal. I choose a bitvec even though its asymptotics are worse. I
 // did this because bitvecs have much lower constants on all the operations in question.
 pub struct BlockMap {
-    vec:  BitVec,
+    vec: BitVec,
 }
 
 impl BlockMap {
@@ -76,12 +77,17 @@ impl BlockMap {
         vec.iter().enumerate().find(|&(_, b)| b == false).map(|(i, _)| i)
     }
 
-    pub fn alloc(&mut self) -> Option<BlockNumber> {
-        BlockMap::find_free(&self.vec).map(|i| {
-            let block_number = BlockNumber::new(i as u64);
-            self.set(block_number, true);
-            block_number
-        })
+    pub fn alloc(&mut self) -> device::Result<BlockNumber> {
+        match BlockMap::find_free(&self.vec) {
+            Some(i) => {
+                let block_number = BlockNumber::new(i as u64);
+                self.set(block_number, true);
+                Ok(block_number)
+            }
+            None => {
+                Err(Error::Size("out of blocks".to_string()))
+            }
+        }
     }
 
     pub fn free(&mut self, block_number: BlockNumber) {
@@ -168,25 +174,25 @@ bitflags! {
 // 32 bits but that restriction is silly and wrong. See the 2038 unix-time apocalypse for details.
 #[derive(Serialize, Deserialize)]
 pub struct INode {
-    inode_num:  u16,
     cdate:      SystemTime,
     mdate:      SystemTime,
     flags:      INodeFlags,
     perms:      Permissions,
+    length:     u64,
     level:      u8,
-    block_ptrs: [BlockNumber; 12]
+    block_ptrs: [BlockNumber; 8]
 }
 
 impl INode {
-    pub fn new(inode_num: u16, now: SystemTime) -> INode {
+    pub fn new(now: SystemTime) -> INode {
         INode {
-            inode_num,
             cdate: now,
             mdate: now,
             flags: INodeFlags::FREE,
             perms: Permissions::UNUSED,
+            length: 0,
             level: 0,
-            block_ptrs: [BlockNumber::new(0); 12]
+            block_ptrs: [BlockNumber::new(0); 8]
         }
     }
 }
@@ -198,7 +204,7 @@ pub struct INodeMap {
 impl INodeMap {
     pub fn new(inode_count: u16) -> INodeMap {
         let now = SystemTime::now();
-        let nodes = (0..inode_count).map(|num| INode::new(num, now)).collect::<Vec<_>>();
+        let nodes = (0..inode_count).map(|_| INode::new(now)).collect::<Vec<_>>();
         INodeMap { vec: nodes }
     }
 
@@ -210,11 +216,21 @@ impl INodeMap {
             .map(|(i,_)| i)
     }
 
-    pub fn alloc(&mut self, flags: INodeFlags) -> Option<BlockNumber> {
-        self.find_free().map(|i| {
-            self.vec[i].flags = flags;
-            BlockNumber::new(i as u64)
+    pub fn alloc(&mut self, flags: INodeFlags) -> Option<usize> {
+        self.find_free().map(move |i| {
+            let inode = &mut self.vec[i];
+            inode.flags = flags;
+            inode.mdate = SystemTime::now();
+            i
         })
+    }
+
+    pub fn get(&self, index: usize) -> &INode {
+        &self.vec[index]
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> &mut INode {
+        &mut self.vec[index]
     }
 
     pub fn free(&mut self, block_number: BlockNumber) {
@@ -254,11 +270,12 @@ impl Display for INodeMap {
     }
 }
 
+
 pub struct FileSystem {
     pub master_block: MasterBlock,
     pub block_map:    BlockMap,
     pub inode_map:    INodeMap,
-        device:       BlockDevice
+        cache:        Cache
 }
 
 pub struct Mount {
@@ -278,7 +295,8 @@ impl FileSystem {
             block_map.set(i, true);
         }
         let inode_map = INodeMap::new(INODE_COUNT);
-        FileSystem { master_block, block_map, inode_map, device }
+        let cache = Cache::new(device);
+        FileSystem { master_block, block_map, inode_map, cache }
     }
 
     pub fn write(&mut self) -> device::Result<()> {
@@ -290,7 +308,7 @@ impl FileSystem {
             bm_vec[i] = b;
             i += 1;
             if i == master_block.block_size as usize {
-                self.device.write(block_number, &mut bm_vec)?;
+                self.cache.device.write(block_number, &mut bm_vec)?;
                 block_number.next();
                 i = 0;
             }
@@ -299,15 +317,18 @@ impl FileSystem {
             for j in i .. master_block.block_size as usize {
                 bm_vec[j] = 0;
             }
-            self.device.write(block_number, &mut bm_vec)?;
+            self.cache.device.write(block_number, &mut bm_vec)?;
         }
         assert!(block_number < master_block.inode_map);
         block_number = master_block.inode_map;
         for node in self.inode_map.vec.iter() {
             let mut node_bytes = vec![0u8; master_block.block_size as usize];
             serialize_into(&mut node_bytes[..], &node)?;
-            self.device.write(block_number, &mut node_bytes)?;
+            self.cache.device.write(block_number, &mut node_bytes)?;
             block_number.next();
+        }
+        for (block_number, cache_entry) in &self.cache.entries {
+            self.cache.device.write(*block_number, &mut cache_entry.bytes())?
         }
         Ok(())
     }
@@ -318,7 +339,7 @@ impl FileSystem {
         let mut master_block : MasterBlock = deserialize_from(&mb_vec[..])?;
         let mut bit_vec = BitVec::new();
         let mut block_number = master_block.block_map;
-        for _ in 0 .. master_block.block_map_blocks() {
+        for _ in 1 .. master_block.block_map_blocks() + 1 {
             let mut bm_vec = vec![0; master_block.block_size as usize];
             device.read(block_number, &mut bm_vec)?;
             block_number.next();
@@ -339,13 +360,105 @@ impl FileSystem {
         let inode_map = INodeMap { vec: nodes };
         let clean_mount = master_block.flags.contains(MasterBlockFlags::SYNCED);
         master_block.write_sync_status(&mut device, false)?;
-        let file_system = FileSystem { master_block, block_map, inode_map, device };
+        let cache = Cache::new(device);
+        let file_system = FileSystem { master_block, block_map, inode_map, cache };
         Ok(Mount { file_system, clean_mount })
     }
 
     pub fn close(mut self) -> device::Result<()> {
         self.write()?;
-        self.master_block.write_sync_status(&mut self.device, true)
+        self.master_block.write_sync_status(&mut self.cache.device, true)
+    }
+
+    pub fn lookup_block_num_from_offset<'a>(&mut self, inode_num: usize, offset: BlockOffset) ->
+        device::Result<Option<BlockNumber>>
+    {
+        fn rec(cache: &mut Cache, offset: BlockOffset, block_ptrs: &[BlockNumber], level: u8) ->
+            device::Result<Option<BlockNumber>>
+        {
+            if level == 0 {
+                if offset < block_ptrs.len() {
+                    let block_num = block_ptrs[offset.index()];
+                    if block_num == MASTER_BLOCK_NUMBER {
+                        Ok(None)
+                    } else {
+                        Ok(Some(block_num))
+                    }
+                } else {
+                    Err(Error::Overflow)
+                }
+            } else {
+                let bnpl = cache.device.block_numbers_per_level(level);
+                let next_offset = offset % bnpl;
+                let next_block  = offset / bnpl;
+                let next_block_index = block_ptrs[next_block.index()];
+                if next_block_index == MASTER_BLOCK_NUMBER {
+                    Ok(None)
+                } else {
+                    let next_block_ptrs = cache.read_pointers(next_block_index)?;
+                    rec(cache, next_offset, &next_block_ptrs, level - 1)
+                }
+            }
+        }
+        let inode = self.inode_map.get(inode_num);
+        rec(&mut self.cache, offset, &inode.block_ptrs, inode.level)
+    }
+
+    pub fn alloc_block_num_from_offset(&mut self, inode_num: usize, offset: BlockOffset) ->
+        device::Result<Option<BlockNumber>>
+    {
+        fn rec(block_map: &mut BlockMap,
+               cache: &mut Cache,
+               offset: BlockOffset,
+               block_ptrs: &mut [BlockNumber],
+               level: u8) ->
+            device::Result<Option<BlockNumber>>
+        {
+            if level == 0 {
+                if offset < block_ptrs.len() {
+                    let block_num = block_ptrs[offset.index()];
+                    if block_num == MASTER_BLOCK_NUMBER {
+                        let new_block_num = block_map.alloc()?;
+                        block_ptrs[offset.index()] = new_block_num;
+                        Ok(Some(new_block_num))
+                    } else {
+                        Ok(Some(block_num))
+                    }
+                } else {
+                    Err(Error::Overflow)
+                }
+            } else {
+                let bnpl = cache.device.block_numbers_per_level(level);
+                let next_offset = offset % bnpl;
+                let next_block  = offset / bnpl;
+                let next_block_index = block_ptrs[next_block.index()];
+                if next_block_index == MASTER_BLOCK_NUMBER {
+                    Ok(None)
+                } else {
+                    let mut next_block_ptrs = cache.read_pointers(next_block_index)?;
+                    rec(block_map, cache, next_offset, &mut next_block_ptrs, level - 1)
+                }
+            }
+        }
+        let inode = self.inode_map.get_mut(inode_num);
+        let bnpl = self.cache.device.block_numbers_per_level(inode.level);
+        if offset >= inode.block_ptrs.len() * bnpl {
+            let new_block_num = self.block_map.alloc()?;
+            let mut new_block = vec![MASTER_BLOCK_NUMBER; self.cache.device.block_numbers_per_block()];
+            let mut i = 0;
+            for block_num in inode.block_ptrs.iter() {
+                new_block[i] = *block_num;
+                i += 1;
+            }
+            self.cache.write_pointers(new_block_num, new_block);
+            let mut new_block_ptrs = [MASTER_BLOCK_NUMBER; 8];
+            new_block_ptrs[0] = new_block_num;
+            inode.block_ptrs = new_block_ptrs;
+            inode.level += 1;
+        }
+        let r = rec(&mut self.block_map, &mut self.cache, offset, &mut inode.block_ptrs, inode.level)?;
+        inode.length += 1;
+        Ok(r)
     }
 }
 
@@ -357,8 +470,31 @@ mod tests {
     #[test]
     fn inode_seralize_len() {
         let now = SystemTime::now();
-        let inode = INode::new(32, now);
+        let inode = INode::new(now);
         let v = serialize(&inode).unwrap();
-        assert_eq!(126, v.len())
+        assert!(v.len() < 128)
     }
+
+    #[test]
+    fn inode_alloc_read_simple() {
+        let device = BlockDevice::create("foo", 128, Some(128)).unwrap();
+        let mut fs = FileSystem::new(device);
+        let zero   = BlockOffset::new(0);
+        let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
+        let alloced_block_num = fs.alloc_block_num_from_offset(inode_num, zero).unwrap();
+        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, zero).unwrap();
+        assert_eq!(alloced_block_num, stored_block_num)
+    }
+
+    #[test]
+    fn inode_alloc_read_many() {
+        let device = BlockDevice::create("foo", 128, Some(128)).unwrap();
+        let mut fs = FileSystem::new(device);
+        let zero   = BlockOffset::new(0);
+        let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
+        let alloced_block_num = fs.alloc_block_num_from_offset(inode_num, zero).unwrap();
+        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, zero).unwrap();
+        assert_eq!(alloced_block_num, stored_block_num)
+    }
+
 }

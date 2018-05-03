@@ -11,4 +11,5 @@ extern crate bit_vec;
 pub mod block_number;
 pub use block_number::BlockNumber;
 pub mod device;
+pub mod cache;
 pub mod fs;

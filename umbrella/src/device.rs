@@ -1,3 +1,4 @@
+use std::mem;
 use std::str::{self, FromStr};
 use std::path::PathBuf;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -13,7 +14,9 @@ pub enum Error {
     Parse(Err),
     Bincode(Box<bincode::ErrorKind>),
     IO(io::Error),
-    Size(String)
+    Size(String),
+    CacheInvalid,
+    Overflow
 }
 
 impl Debug for Error {
@@ -25,10 +28,12 @@ impl Debug for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> result::Result<(), fmt::Error> {
         match *self {
-            Error::Parse(ref err)   => write!(f, "Parse error: {}", err),
+            Error::Parse(ref err)   => write!(f, "parse error: {}", err),
             Error::Bincode(ref err) => write!(f, "(de)serialization error: {}", err),
             Error::IO(ref err)      => write!(f, "{}", err),
-            Error::Size(ref err)    => write!(f, "{}", err)
+            Error::Size(ref err)    => write!(f, "{}", err),
+            Error::CacheInvalid     => write!(f, "cache invalid"),
+            Error::Overflow         => write!(f, "overflow")
         }
     }
 }
@@ -144,7 +149,6 @@ impl BlockDevice {
         Ok(BlockDevice { config, handle })
     }
 
-
     pub fn open(path: &str) -> Result<BlockDevice> {
         let mut config = DeviceConfig::parse(path)?;
         let handle = OpenOptions::new()
@@ -192,6 +196,14 @@ impl BlockDevice {
         self.seek(block_num, buf)?;
         self.handle.write_all(buf)?;
         Ok(())
+    }
+
+    pub fn block_numbers_per_block(&self) -> usize {
+        (self.config.block_size / mem::size_of::<BlockNumber>() as u16) as usize
+    }
+
+    pub fn block_numbers_per_level(&self, level: u8) -> usize {
+        self.block_numbers_per_block().pow(level as u32)
     }
 }
 
