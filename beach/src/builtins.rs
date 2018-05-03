@@ -135,8 +135,8 @@ pub fn block_map(env: &Env, _args: Args) {
 pub fn alloc_block(env: &Env, _args: Args) {
     env.with_fs(|fs| {
         match fs.block_map.alloc() {
-            Some(block_number) => println!("alloc [{}]", block_number),
-            None => println!("ERROR: No room left on device")
+            Ok(block_number) => println!("alloc [{}]", block_number),
+            Err(err) => println!("ERROR: {}", err)
         }
     })
 }
