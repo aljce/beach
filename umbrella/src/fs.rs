@@ -3,7 +3,7 @@ use std::time::{SystemTime};
 use bit_vec::BitVec;
 use bincode::{serialize_into, deserialize_from};
 
-use block_number::{BlockNumber, BlockOffset, MASTER_BLOCK_NUMBER, Sequence};
+use block_number::{BlockNumber, BlockOffset, MASTER_BLOCK_NUMBER, Step, Sequence};
 use device::{self, BlockDevice, Error};
 use cache::{Cache};
 
@@ -309,7 +309,7 @@ impl FileSystem {
             i += 1;
             if i == master_block.block_size as usize {
                 self.cache.device.write(block_number, &mut bm_vec)?;
-                block_number.next();
+                block_number.inc();
                 i = 0;
             }
         }
@@ -325,7 +325,7 @@ impl FileSystem {
             let mut node_bytes = vec![0u8; master_block.block_size as usize];
             serialize_into(&mut node_bytes[..], &node)?;
             self.cache.device.write(block_number, &mut node_bytes)?;
-            block_number.next();
+            block_number.inc();
         }
         for (block_number, cache_entry) in &self.cache.entries {
             self.cache.device.write(*block_number, &mut cache_entry.bytes())?
@@ -342,7 +342,7 @@ impl FileSystem {
         for _ in 1 .. master_block.block_map_blocks() + 1 {
             let mut bm_vec = vec![0; master_block.block_size as usize];
             device.read(block_number, &mut bm_vec)?;
-            block_number.next();
+            block_number.inc();
             bit_vec.extend(BitVec::from_bytes(&bm_vec));
         }
         bit_vec.truncate(master_block.block_count as usize);
@@ -353,7 +353,7 @@ impl FileSystem {
         for _ in 0 .. master_block.inode_count {
             let mut node_bytes = vec![0u8; master_block.block_size as usize];
             device.read(block_number, &mut node_bytes)?;
-            block_number.next();
+            block_number.inc();
             let node = deserialize_from(&node_bytes[..])?;
             nodes.push(node);
         }
@@ -490,11 +490,12 @@ mod tests {
     fn inode_alloc_read_many() {
         let device = BlockDevice::create("foo", 128, Some(128)).unwrap();
         let mut fs = FileSystem::new(device);
-        let zero   = BlockOffset::new(0);
         let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
-        let alloced_block_num = fs.alloc_block_num_from_offset(inode_num, zero).unwrap();
-        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, zero).unwrap();
-        assert_eq!(alloced_block_num, stored_block_num)
+        let seq = Sequence::new(BlockOffset::zero(), 20);
+        let alloced_block_nums =
+            seq.map(|i| fs.alloc_block_num_from_offset(inode_num, i).unwrap()).collect::<Vec<_>>();
+        let stored_block_nums =
+            seq.map(|i| fs.lookup_block_num_from_offset(inode_num, i).unwrap()).collect::<Vec<_>>();
+        assert_eq!(alloced_block_nums, stored_block_nums);
     }
-
 }

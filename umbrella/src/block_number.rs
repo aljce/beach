@@ -3,6 +3,10 @@ use std::cmp::Ordering;
 use std::result;
 use std::ops::{Rem, Div};
 
+pub trait Step {
+    fn inc(&mut self);
+}
+
 // `BlockNumber` is an abstraction designed to encapsulate indexing into the disk
 // It reduces the likely hood of conjuring a random block number. It does this bytes
 // making creating a `BlockNumber` explicit.
@@ -20,12 +24,15 @@ impl BlockNumber {
         BlockNumber { number }
     }
 
-    pub (crate) fn next(&mut self) {
-        self.number += 1;
-    }
-
     pub (crate) fn index(&self) -> usize {
         self.number as usize
+    }
+
+    pub fn seq(self, end: u64) -> Sequence<BlockNumber> {
+        Sequence {
+            current: self,
+            end: BlockNumber::new(end)
+        }
     }
 
 }
@@ -42,31 +49,44 @@ impl Display for BlockNumber {
     }
 }
 
-pub struct Sequence {
-    current: BlockNumber,
-    end:     u64
-}
-
-impl Sequence {
-    pub fn new(start: BlockNumber, end: u64) -> Sequence {
-        Sequence { current: start, end }
+impl From<u64> for BlockNumber {
+    fn from(number: u64) -> BlockNumber {
+        BlockNumber { number }
     }
 }
 
-impl Iterator for Sequence {
-    type Item = BlockNumber;
+impl Step for BlockNumber {
+    fn inc(&mut self) {
+        self.number += 1;
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Sequence<S> {
+    current: S,
+    end:     S
+}
+
+impl<S: From<u64>> Sequence<S> {
+    pub fn new(start: S, end: u64) -> Sequence<S> {
+        Sequence { current: start, end: S::from(end) }
+    }
+}
+
+impl<S: Copy + Eq + Step> Iterator for Sequence<S> {
+    type Item = S;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current.number == self.end {
+        if self.current == self.end {
             None
         } else {
             let res = self.current;
-            self.current.next();
+            self.current.inc();
             Some(res)
         }
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BlockOffset {
     offset: u64
 }
@@ -74,6 +94,10 @@ pub struct BlockOffset {
 impl BlockOffset {
     pub fn new(offset: u64) -> BlockOffset {
         BlockOffset { offset }
+    }
+
+    pub fn zero() -> BlockOffset {
+        BlockOffset::new(0)
     }
 
     pub fn index(&self) -> usize {
@@ -106,5 +130,17 @@ impl Rem<usize> for BlockOffset {
     fn rem(mut self, modulus: usize) -> Self::Output {
         self.offset = self.offset % modulus as u64;
         self
+    }
+}
+
+impl From<u64> for BlockOffset {
+    fn from(offset: u64) -> BlockOffset {
+        BlockOffset::new(offset)
+    }
+}
+
+impl Step for BlockOffset {
+    fn inc(&mut self) {
+        self.offset += 1;
     }
 }
