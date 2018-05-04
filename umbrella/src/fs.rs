@@ -172,7 +172,7 @@ bitflags! {
 }
 // I use rusts SystemTime to represent and serialize time. This type cannot be fit into
 // 32 bits but that restriction is silly and wrong. See the 2038 unix-time apocalypse for details.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct INode {
     cdate:      SystemTime,
     mdate:      SystemTime,
@@ -285,7 +285,7 @@ pub struct Mount {
 
 impl FileSystem {
     pub fn new(device: BlockDevice) -> FileSystem {
-        const INODE_COUNT : u16 = 10;
+        const INODE_COUNT : u16 = 50;
         let block_size = device.config.block_size;
         let block_count = device.config.block_count;
         let mut block_map = BlockMap::new(block_count);
@@ -370,6 +370,9 @@ impl FileSystem {
         self.master_block.write_sync_status(&mut self.cache.device, true)
     }
 
+    /// This is the static version of getDiskAddr where allocp = false.
+    /// This function operates on a file system and takes an inode num instead of
+    /// operating on inode and taking a file system. This satiates the borrow checker.
     pub fn lookup_block_num_from_offset<'a>(&mut self, inode_num: usize, offset: BlockOffset) ->
         device::Result<Option<BlockNumber>>
     {
@@ -401,28 +404,33 @@ impl FileSystem {
             }
         }
         let inode = self.inode_map.get(inode_num);
+        // println!("{:?}", inode);
         rec(&mut self.cache, offset, &inode.block_ptrs, inode.level)
     }
 
+    /// This is the allocing version of getDiskAddr where allocp = true.
+    /// This function operates on a file system and takes an inode num instead of
+    /// operating on inode and taking a file system. This satiates the borrow checker.
     pub fn alloc_block_num_from_offset(&mut self, inode_num: usize, offset: BlockOffset) ->
-        device::Result<Option<BlockNumber>>
+        device::Result<BlockNumber>
     {
         fn rec(block_map: &mut BlockMap,
                cache: &mut Cache,
                offset: BlockOffset,
                block_ptrs: &mut [BlockNumber],
                level: u8) ->
-            device::Result<Option<BlockNumber>>
+            device::Result<BlockNumber>
         {
+            println!("{:?}: {:?}", level, block_ptrs);
             if level == 0 {
                 if offset < block_ptrs.len() {
                     let block_num = block_ptrs[offset.index()];
                     if block_num == MASTER_BLOCK_NUMBER {
                         let new_block_num = block_map.alloc()?;
                         block_ptrs[offset.index()] = new_block_num;
-                        Ok(Some(new_block_num))
+                        Ok(new_block_num)
                     } else {
-                        Ok(Some(block_num))
+                        Ok(block_num)
                     }
                 } else {
                     Err(Error::Overflow)
@@ -432,17 +440,26 @@ impl FileSystem {
                 let next_offset = offset % bnpl;
                 let next_block  = offset / bnpl;
                 let next_block_index = block_ptrs[next_block.index()];
-                if next_block_index == MASTER_BLOCK_NUMBER {
-                    Ok(None)
+                let mut next_block_ptrs = if next_block_index == MASTER_BLOCK_NUMBER {
+                    println!("inside alloc next block: {}", next_block.index());
+                    let new_block_num = block_map.alloc()?;
+                    block_ptrs[next_block.index()] = new_block_num;
+                    let new_block =
+                        vec![MASTER_BLOCK_NUMBER; cache.device.block_numbers_per_block()];
+                    cache.write_pointers(new_block_num, new_block.clone());
+                    new_block
                 } else {
-                    let mut next_block_ptrs = cache.read_pointers(next_block_index)?;
-                    rec(block_map, cache, next_offset, &mut next_block_ptrs, level - 1)
-                }
+                    cache.read_pointers(next_block_index)?
+                };
+                rec(block_map, cache, next_offset, &mut next_block_ptrs, level - 1)
             }
         }
         let inode = self.inode_map.get_mut(inode_num);
-        let bnpl = self.cache.device.block_numbers_per_level(inode.level);
-        if offset >= inode.block_ptrs.len() * bnpl {
+        let mut bnpl = self.cache.device.block_numbers_per_level(inode.level);
+        let mut j = 0;
+        while offset >= inode.block_ptrs.len() * bnpl {
+            println!("alloc {}", j);
+            j += 1;
             let new_block_num = self.block_map.alloc()?;
             let mut new_block = vec![MASTER_BLOCK_NUMBER; self.cache.device.block_numbers_per_block()];
             let mut i = 0;
@@ -455,6 +472,7 @@ impl FileSystem {
             new_block_ptrs[0] = new_block_num;
             inode.block_ptrs = new_block_ptrs;
             inode.level += 1;
+            bnpl = self.cache.device.block_numbers_per_level(inode.level);
         }
         let r = rec(&mut self.block_map, &mut self.cache, offset, &mut inode.block_ptrs, inode.level)?;
         inode.length += 1;
@@ -482,7 +500,7 @@ mod tests {
         let zero   = BlockOffset::new(0);
         let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
         let alloced_block_num = fs.alloc_block_num_from_offset(inode_num, zero).unwrap();
-        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, zero).unwrap();
+        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, zero).unwrap().unwrap();
         assert_eq!(alloced_block_num, stored_block_num)
     }
 
@@ -492,10 +510,16 @@ mod tests {
         let mut fs = FileSystem::new(device);
         let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
         let seq = Sequence::new(BlockOffset::zero(), 20);
+        println!();
         let alloced_block_nums =
-            seq.map(|i| fs.alloc_block_num_from_offset(inode_num, i).unwrap()).collect::<Vec<_>>();
+            seq.map(|i| {
+                println!("{}", i.index());
+                Some(fs.alloc_block_num_from_offset(inode_num, i).unwrap())
+            }).collect::<Vec<_>>();
         let stored_block_nums =
-            seq.map(|i| fs.lookup_block_num_from_offset(inode_num, i).unwrap()).collect::<Vec<_>>();
+            seq.map(|i| {
+                fs.lookup_block_num_from_offset(inode_num, i).unwrap()
+            }).collect::<Vec<_>>();
         assert_eq!(alloced_block_nums, stored_block_nums);
     }
 }
