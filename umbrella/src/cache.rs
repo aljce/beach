@@ -1,15 +1,36 @@
 use std::mem;
+use std::cell::{RefCell, Ref, RefMut};
 use std::collections::hash_map::{HashMap, Entry};
+use std::rc::Rc;
 
 use block_number::{BlockNumber};
 use device::{self, BlockDevice, Error};
 
+#[derive(Clone)]
+pub struct SharedVec<T> {
+    pub vec: Rc<RefCell<Vec<T>>>
+}
+
+impl<T> SharedVec<T> {
+    pub fn new(vec: Vec<T>) -> SharedVec<T> {
+        SharedVec { vec: Rc::new(RefCell::new(vec)) }
+    }
+
+    pub fn borrow(&self) -> Ref<Vec<T>> {
+        self.vec.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<Vec<T>> {
+        self.vec.borrow_mut()
+    }
+}
+
 pub enum CacheEntry {
     Block {
-        block: Vec<u8>
+        block: SharedVec<u8>
     },
     Pointers {
-        pointers: Vec<BlockNumber>
+        pointers: SharedVec<BlockNumber>
     }
 }
 
@@ -60,17 +81,14 @@ impl CacheEntry {
         use self::CacheEntry::*;
         match *self {
             Block { ref block } => {
-                block.clone()
+                block.borrow().clone()
             }
             Pointers { ref pointers } => {
-                let res = pointers.clone();
-                to_u8(res)
+                to_u8(pointers.borrow().clone())
             }
         }
     }
 }
-
-
 
 pub struct Cache {
     pub (crate) entries: HashMap<BlockNumber, CacheEntry>,
@@ -85,7 +103,7 @@ impl Cache {
         }
     }
 
-    pub fn read(&mut self, block_num: BlockNumber) -> device::Result<Vec<u8>> {
+    pub fn read(&mut self, block_num: BlockNumber) -> device::Result<SharedVec<u8>> {
         use self::CacheEntry::*;
         let block_size = self.device.config.block_size as usize;
         let Cache { ref mut entries, ref mut device } = *self;
@@ -103,14 +121,16 @@ impl Cache {
             Entry::Vacant(v) => {
                 let mut block = vec![0; block_size];
                 device.read(block_num, &mut block)?;
-                let cache_entry = Block { block: block.clone() };
+                let vec = SharedVec::new(block);
+                let cache_entry = Block { block: vec.clone() };
                 v.insert(cache_entry);
-                Ok(block)
+                Ok(vec)
             }
         }
     }
 
-    pub fn read_pointers(&mut self, block_num: BlockNumber) -> device::Result<Vec<BlockNumber>> {
+    pub fn read_pointers(&mut self, block_num: BlockNumber)
+                         -> device::Result<SharedVec<BlockNumber>> {
         use self::CacheEntry::*;
         let block_size = self.device.config.block_size as usize;
         let Cache { ref mut entries, ref mut device } = *self;
@@ -132,16 +152,25 @@ impl Cache {
                     // LAST-AUDIT: mckean.kylej@gmail.com 01-05-18
                     from_u8(block)
                 };
-                let cache_entry = Pointers { pointers: pointers.clone() };
+                let vec = SharedVec::new(pointers);
+                let cache_entry = Pointers { pointers: vec.clone() };
                 v.insert(cache_entry);
-                Ok(pointers)
+                Ok(vec)
             }
         }
     }
 
     pub fn write_pointers(&mut self, block_num: BlockNumber, pointers: Vec<BlockNumber>) {
         use self::CacheEntry::*;
-        self.entries.insert(block_num, Pointers { pointers });
+        let ps = Pointers { pointers: SharedVec::new(pointers) };
+        self.entries.insert(block_num, ps);
+    }
+
+    pub fn write_all(&mut self) -> device::Result<()> {
+        for (block_number, cache_entry) in &self.entries {
+            self.device.write(*block_number, &mut cache_entry.bytes())?
+        }
+        Ok(())
     }
 }
 

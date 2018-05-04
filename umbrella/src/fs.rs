@@ -5,7 +5,7 @@ use bincode::{serialize_into, deserialize_from};
 
 use block_number::{BlockNumber, BlockOffset, MASTER_BLOCK_NUMBER, Step, Sequence};
 use device::{self, BlockDevice, Error};
-use cache::{Cache};
+use cache::{SharedVec, Cache};
 
 bitflags! {
     #[derive(Serialize, Deserialize)]
@@ -327,9 +327,7 @@ impl FileSystem {
             self.cache.device.write(block_number, &mut node_bytes)?;
             block_number.inc();
         }
-        for (block_number, cache_entry) in &self.cache.entries {
-            self.cache.device.write(*block_number, &mut cache_entry.bytes())?
-        }
+        self.cache.write_all()?;
         Ok(())
     }
 
@@ -376,9 +374,13 @@ impl FileSystem {
     pub fn lookup_block_num_from_offset<'a>(&mut self, inode_num: usize, offset: BlockOffset) ->
         device::Result<Option<BlockNumber>>
     {
-        fn rec(cache: &mut Cache, offset: BlockOffset, block_ptrs: &[BlockNumber], level: u8) ->
+        fn rec(cache: &mut Cache,
+               offset: BlockOffset,
+               vec: SharedVec<BlockNumber>,
+               level: u8) ->
             device::Result<Option<BlockNumber>>
         {
+            let block_ptrs = vec.borrow();
             if level == 0 {
                 if offset < block_ptrs.len() {
                     let block_num = block_ptrs[offset.index()];
@@ -399,13 +401,13 @@ impl FileSystem {
                     Ok(None)
                 } else {
                     let next_block_ptrs = cache.read_pointers(next_block_index)?;
-                    rec(cache, next_offset, &next_block_ptrs, level - 1)
+                    rec(cache, next_offset, next_block_ptrs, level - 1)
                 }
             }
         }
         let inode = self.inode_map.get(inode_num);
-        // println!("{:?}", inode);
-        rec(&mut self.cache, offset, &inode.block_ptrs, inode.level)
+        let block_ptrs = SharedVec::new(inode.block_ptrs.iter().map(|n| *n).collect());
+        rec(&mut self.cache, offset, block_ptrs, inode.level)
     }
 
     /// This is the allocing version of getDiskAddr where allocp = true.
@@ -417,11 +419,11 @@ impl FileSystem {
         fn rec(block_map: &mut BlockMap,
                cache: &mut Cache,
                offset: BlockOffset,
-               block_ptrs: &mut [BlockNumber],
+               vec: SharedVec<BlockNumber>,
                level: u8) ->
             device::Result<BlockNumber>
         {
-            println!("{:?}: {:?}", level, block_ptrs);
+            let mut block_ptrs = vec.borrow_mut();
             if level == 0 {
                 if offset < block_ptrs.len() {
                     let block_num = block_ptrs[offset.index()];
@@ -440,26 +442,23 @@ impl FileSystem {
                 let next_offset = offset % bnpl;
                 let next_block  = offset / bnpl;
                 let next_block_index = block_ptrs[next_block.index()];
-                let mut next_block_ptrs = if next_block_index == MASTER_BLOCK_NUMBER {
-                    println!("inside alloc next block: {}", next_block.index());
+                let next_block_num = if next_block_index == MASTER_BLOCK_NUMBER {
                     let new_block_num = block_map.alloc()?;
                     block_ptrs[next_block.index()] = new_block_num;
                     let new_block =
                         vec![MASTER_BLOCK_NUMBER; cache.device.block_numbers_per_block()];
-                    cache.write_pointers(new_block_num, new_block.clone());
-                    new_block
+                    cache.write_pointers(new_block_num, new_block);
+                    new_block_num
                 } else {
-                    cache.read_pointers(next_block_index)?
+                    next_block_index
                 };
-                rec(block_map, cache, next_offset, &mut next_block_ptrs, level - 1)
+                let next_block_ptrs = cache.read_pointers(next_block_num)?;
+                rec(block_map, cache, next_offset, next_block_ptrs, level - 1)
             }
         }
         let inode = self.inode_map.get_mut(inode_num);
         let mut bnpl = self.cache.device.block_numbers_per_level(inode.level);
-        let mut j = 0;
         while offset >= inode.block_ptrs.len() * bnpl {
-            println!("alloc {}", j);
-            j += 1;
             let new_block_num = self.block_map.alloc()?;
             let mut new_block = vec![MASTER_BLOCK_NUMBER; self.cache.device.block_numbers_per_block()];
             let mut i = 0;
@@ -474,9 +473,12 @@ impl FileSystem {
             inode.level += 1;
             bnpl = self.cache.device.block_numbers_per_level(inode.level);
         }
-        let r = rec(&mut self.block_map, &mut self.cache, offset, &mut inode.block_ptrs, inode.level)?;
-        inode.length += 1;
-        Ok(r)
+        let block_ptrs = SharedVec::new(inode.block_ptrs.iter().map(|n| *n).collect());
+        let res = rec(&mut self.block_map, &mut self.cache, offset, block_ptrs.clone(), inode.level);
+        for (i, n) in block_ptrs.vec.borrow().iter().enumerate() {
+            inode.block_ptrs[i] = *n
+        }
+        res
     }
 }
 
@@ -506,10 +508,10 @@ mod tests {
 
     #[test]
     fn inode_alloc_read_many() {
-        let device = BlockDevice::create("foo", 128, Some(128)).unwrap();
+        let device = BlockDevice::create("foo", 1024, Some(128)).unwrap();
         let mut fs = FileSystem::new(device);
         let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
-        let seq = Sequence::new(BlockOffset::zero(), 20);
+        let seq = Sequence::new(BlockOffset::zero(), 200);
         println!();
         let alloced_block_nums =
             seq.map(|i| {
