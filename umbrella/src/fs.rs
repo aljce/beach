@@ -515,7 +515,6 @@ mod tests {
         println!();
         let alloced_block_nums =
             seq.map(|i| {
-                println!("{}", i.index());
                 Some(fs.alloc_block_num_from_offset(inode_num, i).unwrap())
             }).collect::<Vec<_>>();
         let stored_block_nums =
@@ -523,5 +522,28 @@ mod tests {
                 fs.lookup_block_num_from_offset(inode_num, i).unwrap()
             }).collect::<Vec<_>>();
         assert_eq!(alloced_block_nums, stored_block_nums);
+    }
+
+    #[test]
+    fn inode_alloc_read_middle() {
+        let device = BlockDevice::create("foo", 1024, Some(128)).unwrap();
+        let mut fs = FileSystem::new(device);
+        let inode_num = fs.inode_map.alloc(INodeFlags::FILE).unwrap();
+        let far = BlockOffset::new(300);
+        let alloced_block_num =
+            fs.alloc_block_num_from_offset(inode_num, far).unwrap();
+        let seq = Sequence::new(BlockOffset::zero(), 200);
+        println!();
+        let alloced_block_nums =
+            seq.map(|i| {
+                Some(fs.alloc_block_num_from_offset(inode_num, i).unwrap())
+            }).collect::<Vec<_>>();
+        let stored_block_nums =
+            seq.map(|i| {
+                fs.lookup_block_num_from_offset(inode_num, i).unwrap()
+            }).collect::<Vec<_>>();
+        let stored_block_num = fs.lookup_block_num_from_offset(inode_num, far).unwrap().unwrap();
+        assert_eq!(alloced_block_nums, stored_block_nums);
+        assert_eq!(alloced_block_num, stored_block_num)
     }
 }
